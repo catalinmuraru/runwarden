@@ -1,0 +1,2 @@
+# LF everywhere: gofmt and bash scripts (incl. executor testdata) break on CRLF.
+* text=auto eol=lf
