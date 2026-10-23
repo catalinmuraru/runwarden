@@ -1,0 +1,13 @@
+# Go
+/runwarden
+/bin/
+*.test
+*.out
+
+# Built UI, embedded by internal/web; .gitkeep keeps go:embed compiling before a build
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+
+# Editors / OS
+.idea/
+.DS_Store

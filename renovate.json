@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":pinAllExceptPeerDependencies",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "enabledManagers": ["gomod", "npm", "nvm", "dockerfile", "github-actions", "helm-values", "helmv3"],
+  "postUpdateOptions": ["gomodTidy"],
+  "minimumReleaseAge": "3 days",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Go modules (non-major)"
+    },
+    {
+      "matchManagers": ["npm", "nvm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "npm (non-major)"
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "Docker images (non-major)"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "GitHub Actions (non-major)"
+    },
+    {
+      "matchManagers": ["helm-values", "helmv3"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "Helm (non-major)"
+    },
+    {
+      "description": "Automerge patch updates once CI is green. A group PR only automerges if every update in it is a patch.",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true
+    }
+  ]
+}
