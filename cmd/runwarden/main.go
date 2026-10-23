@@ -15,6 +15,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "check-config" {
+		os.Exit(checkConfig(os.Args[2:], os.Stdout))
+	}
+
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	if err := run(); err != nil {
 		slog.Error("runwarden stopped", "err", err)

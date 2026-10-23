@@ -1,0 +1,19 @@
+{
+  "hidden": true,
+  "description": "Hidden: only used through include, never listed.",
+  "parameters": [
+    {
+      "name": "Dry run",
+      "param": "--simulate",
+      "no_value": true
+    },
+    {
+      "name": "Timeout seconds",
+      "param": "--timeout",
+      "type": "int",
+      "default": 30,
+      "min": 1,
+      "max": 600
+    }
+  ]
+}

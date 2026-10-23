@@ -1,0 +1,21 @@
+{
+  "name": "Restart Service",
+  "script_path": "examples/scripts/print_args.sh",
+  "working_directory": ".",
+  "description": "Restarts a service. Shared options come from an included hidden config.",
+  "group": "Maintenance",
+  "allowed_users": ["@ops"],
+  "include": "examples/runners/shared_options.json",
+  "parameters": [
+    {
+      "name": "Service",
+      "param": "--service",
+      "required": true
+    },
+    {
+      "name": "Dry run",
+      "param": "--dry-run",
+      "description": "Also defined in the included file; this definition wins"
+    }
+  ]
+}

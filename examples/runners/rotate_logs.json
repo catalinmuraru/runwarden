@@ -1,0 +1,50 @@
+{
+  "name": "🗂️ Rotate Logs",
+  "script_path": "examples/scripts/print_args.sh",
+  "working_directory": ".",
+  "description": "Rotates application logs.\nArguments are positional, booleans are written as strings, and the multiselect uses the legacy `multiple_arguments` option.",
+  "group": "Maintenance",
+  "requires_terminal": "false",
+  "allowed_users": ["*"],
+  "parameters": [
+    {
+      "name": "Service",
+      "required": "true",
+      "description": "No type given: defaults to text"
+    },
+    {
+      "name": "Environment",
+      "type": "list",
+      "default": "staging",
+      "values": ["production", "staging", "dev"],
+      "values_ui_mapping": { "production": "Production", "staging": "Staging", "dev": "Development" }
+    },
+    {
+      "name": "Instances",
+      "type": "multiselect",
+      "values": { "script": "examples/scripts/list_instances.sh ${Environment}" },
+      "separator": " ",
+      "secure": "false"
+    },
+    {
+      "name": "Log files",
+      "type": "multiselect",
+      "multiple_arguments": true,
+      "values": ["app.log", "access.log", "error.log"]
+    },
+    {
+      "name": "Archive",
+      "type": "server_file",
+      "file_dir": "examples/archives",
+      "file_recursive": "True",
+      "file_type": "dir",
+      "excluded_files": ["**/tmp"]
+    },
+    {
+      "name": "Keep days",
+      "type": "int",
+      "default": "14",
+      "pass_as": "stdin"
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "name": "Backup Database",
+  "script_path": "examples/scripts/print_args.sh",
+  "working_directory": ".",
+  "description": "Creates a database backup. Exercises every parameter type that takes a `param` option.",
+  "group": "Databases",
+  "allowed_users": ["@dba", "@ops"],
+  "admin_users": ["@ops"],
+  "parameters": [
+    {
+      "name": "Database",
+      "param": "--database",
+      "type": "list",
+      "required": true,
+      "values": ["orders", "inventory", "billing"]
+    },
+    {
+      "name": "Compression level",
+      "param": "--level=",
+      "same_arg_param": true,
+      "type": "int",
+      "default": 6,
+      "min": 1,
+      "max": "9"
+    },
+    {
+      "name": "Verify after backup",
+      "param": "--verify",
+      "no_value": true,
+      "default": true
+    },
+    {
+      "name": "Tables",
+      "param": "--table",
+      "type": "multiselect",
+      "multiselect_argument_type": "repeat_param_value",
+      "values": ["customers", "orders", "line_items", "audit_log"]
+    },
+    {
+      "name": "Exclude patterns",
+      "param": "--exclude",
+      "type": "multiselect",
+      "multiselect_argument_type": "argument_per_value",
+      "values": ["*.tmp", "*.log", "cache_*"]
+    },
+    {
+      "name": "Label",
+      "param": "--label",
+      "regex": { "pattern": "[a-z0-9-]{1,32}", "description": "lowercase letters, digits and dashes" },
+      "max_length": 32
+    },
+    {
+      "name": "Notes",
+      "param": "--notes",
+      "type": "multiline_text"
+    },
+    {
+      "name": "Target host",
+      "param": "--host",
+      "type": "ip4",
+      "default": "127.0.0.1"
+    },
+    {
+      "name": "Encryption key",
+      "param": "--key",
+      "secure": true,
+      "required": true
+    },
+    {
+      "name": "Storage token",
+      "secure": true,
+      "pass_as": "env_variable",
+      "env_var": "STORAGE_TOKEN"
+    },
+    {
+      "name": "Manifest",
+      "param": "--manifest",
+      "type": "file_upload"
+    },
+    {
+      "name": "Tool version",
+      "param": "--tool-version",
+      "constant": true,
+      "default": "2.4.1"
+    }
+  ]
+}
