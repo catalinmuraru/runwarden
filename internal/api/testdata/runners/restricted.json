@@ -1,0 +1,2 @@
+{ "name": "Restricted", "script_path": "testdata/scripts/echo.sh", "working_directory": ".",
+  "allowed_users": ["@ops"], "admin_users": ["carol"] }

@@ -44,12 +44,13 @@ func TestEnvPolicy(t *testing.T) {
 	t.Setenv("CUSTOM_EXPOSE_X", "custom")
 
 	env, refused := EnvPolicy{}.withDefaults().build(map[string]string{
-		"PARAM_A":       "1",
-		"PATH":          "/evil",
-		"LD_PRELOAD":    "x",
-		"BASH_FUNC_x%%": "() { :; }",
-	})
-	for _, want := range []string{"PATH=/custom/bin", "LANG=C.UTF-8", "TOKEN=for-scripts", "PARAM_A=1"} {
+		"PARAM_A":        "1",
+		"PATH":           "/evil",
+		"LD_PRELOAD":     "x",
+		"BASH_FUNC_x%%":  "() { :; }",
+		"RUNWARDEN_USER": "spoofed",
+	}, map[string]string{"RUNWARDEN_USER": "alice"})
+	for _, want := range []string{"PATH=/custom/bin", "LANG=C.UTF-8", "TOKEN=for-scripts", "PARAM_A=1", "RUNWARDEN_USER=alice"} {
 		if !slices.Contains(env, want) {
 			t.Errorf("env missing %q: %q", want, env)
 		}
@@ -59,11 +60,11 @@ func TestEnvPolicy(t *testing.T) {
 			t.Errorf("env contains %q", kv)
 		}
 	}
-	if want := []string{"BASH_FUNC_x%%", "LD_PRELOAD", "PATH"}; !slices.Equal(refused, want) {
+	if want := []string{"BASH_FUNC_x%%", "LD_PRELOAD", "PATH", "RUNWARDEN_USER"}; !slices.Equal(refused, want) {
 		t.Errorf("refused = %q, want %q", refused, want)
 	}
 
-	env, _ = EnvPolicy{Allow: []string{"OTHER"}, Prefix: "CUSTOM_EXPOSE_"}.withDefaults().build(nil)
+	env, _ = EnvPolicy{Allow: []string{"OTHER"}, Prefix: "CUSTOM_EXPOSE_"}.withDefaults().build(nil, nil)
 	for _, want := range []string{"OTHER=not allowed", "X=custom", "PATH=" + DefaultPath} {
 		if !slices.Contains(env, want) {
 			t.Errorf("custom policy env missing %q: %q", want, env)

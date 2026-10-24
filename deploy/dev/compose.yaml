@@ -1,0 +1,32 @@
+# Local identity providers for development and the auth integration tests.
+#   docker compose -f deploy/dev/compose.yaml up -d
+# Keycloak: http://localhost:8180 (admin/admin), realm "runwarden".
+# OpenLDAP: ldap://localhost:1389, base dc=example,dc=org.
+# Test users in both: alice / alice-password (group "ops"), bob / bob-password (no groups).
+name: runwarden-dev
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b
+    command: ["start-dev", "--import-realm", "--http-port=8180"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:8180:8180"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+
+  ldap:
+    image: osixia/openldap:1.5.0@sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: Example
+      LDAP_DOMAIN: example.org
+      LDAP_ADMIN_PASSWORD: admin-password
+      LDAP_TLS: "false"
+    ports:
+      - "127.0.0.1:1389:389"
+    volumes:
+      - ./ldap:/container/service/slapd/assets/config/bootstrap/ldif/custom:ro

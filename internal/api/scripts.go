@@ -52,10 +52,14 @@ type scriptView struct {
 	Parameters       []paramView `json:"parameters"`
 }
 
-func (s *Server) listScripts(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listScripts(w http.ResponseWriter, r *http.Request) {
 	out := []scriptSummary{}
+	user := currentUser(r)
 	if c := s.catalog.Load(); c != nil {
 		for _, sc := range c.Scripts {
+			if !s.opts.Policy.CanRun(user, sc) {
+				continue
+			}
 			out = append(out, scriptSummary{Name: sc.Name, Group: sc.Group, Description: sc.Description})
 		}
 	}
@@ -63,7 +67,7 @@ func (s *Server) listScripts(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) getScript(w http.ResponseWriter, r *http.Request) {
-	sc := s.script(r.PathValue("name"))
+	sc := s.allowedScript(r, r.PathValue("name"))
 	if sc == nil {
 		writeError(w, http.StatusNotFound, "unknown script")
 		return
@@ -152,7 +156,7 @@ func label(p *params.Parameter, value string) string {
 }
 
 func (s *Server) parameterValues(w http.ResponseWriter, r *http.Request) {
-	sc := s.script(r.PathValue("name"))
+	sc := s.allowedScript(r, r.PathValue("name"))
 	if sc == nil {
 		writeError(w, http.StatusNotFound, "unknown script")
 		return

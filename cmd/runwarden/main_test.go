@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/catalinmuraru/runwarden/internal/api"
+	"github.com/catalinmuraru/runwarden/internal/auth"
 	"github.com/catalinmuraru/runwarden/internal/config"
 )
 
@@ -18,7 +19,7 @@ func get(t *testing.T, h http.Handler, method, path string) int {
 
 func TestProbes(t *testing.T) {
 	apiSrv := api.New(api.Options{}, nil, nil)
-	mux := newMux(apiSrv)
+	mux := newMux(apiSrv, auth.New(auth.Options{Type: config.AuthNone}))
 
 	if code := get(t, mux, http.MethodGet, "/healthz"); code != http.StatusOK {
 		t.Errorf("GET /healthz = %d, want 200", code)

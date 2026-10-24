@@ -20,6 +20,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/catalinmuraru/runwarden/internal/auth"
+	"github.com/catalinmuraru/runwarden/internal/authz"
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
@@ -28,11 +30,45 @@ import (
 const testWait = 20 * time.Second
 
 type testEnv struct {
-	t    *testing.T
-	ts   *httptest.Server
-	ex   *executor.Executor
-	hist *history.Store
-	data string
+	t      *testing.T
+	ts     *httptest.Server
+	ex     *executor.Executor
+	hist   *history.Store
+	data   string
+	user   string // sent as X-Test-User; empty means signed out
+	groups string // comma-separated, sent as X-Test-Groups
+}
+
+// fakeAuth signs requests in from test headers, standing in for the session middleware.
+func fakeAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.Header.Get("X-Test-User")
+		if name == "" {
+			writeError(w, http.StatusUnauthorized, "sign in required")
+			return
+		}
+		u := auth.User{Name: name}
+		if g := r.Header.Get("X-Test-Groups"); g != "" {
+			u.Groups = strings.Split(g, ",")
+		}
+		next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), u)))
+	})
+}
+
+// as returns a copy of e that sends requests as another user.
+func (e *testEnv) as(user, groups string) *testEnv {
+	c := *e
+	c.user, c.groups = user, groups
+	return &c
+}
+
+func (e *testEnv) identify(h http.Header) {
+	if e.user != "" {
+		h.Set("X-Test-User", e.user)
+	}
+	if e.groups != "" {
+		h.Set("X-Test-Groups", e.groups)
+	}
 }
 
 func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
@@ -57,6 +93,8 @@ func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 	if opts.MaxUploadBytes == 0 {
 		opts.MaxUploadBytes = 1 << 20
 	}
+	opts.Authenticate = fakeAuth
+	opts.Policy = authz.Policy{AdminUsers: []string{"root"}}
 	srv := New(opts, ex, hist)
 	srv.SetCatalog(cat)
 	mux := http.NewServeMux()
@@ -69,7 +107,7 @@ func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 		_ = ex.Shutdown(ctx)
 		hist.Wait()
 	})
-	return &testEnv{t: t, ts: ts, ex: ex, hist: hist, data: data}
+	return &testEnv{t: t, ts: ts, ex: ex, hist: hist, data: data, user: "alice", groups: "ops"}
 }
 
 // do sends a request; a non-nil body that is not an io.Reader is sent as JSON.
@@ -96,6 +134,7 @@ func (e *testEnv) do(method, path string, body any, header ...string) (int, []by
 		e.t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", contentType)
+	e.identify(req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		e.t.Fatal(err)
@@ -201,8 +240,11 @@ func TestRunWithJSON(t *testing.T) {
 	id := e.start("Echo", map[string]any{"Name": "abc", "Env": "Production", "Target": "t-prod-2"})
 	meta := e.finish(id)
 
-	if meta.Status != "finished" || meta.ExitCode == nil || *meta.ExitCode != 0 || meta.User != "anonymous" {
+	if meta.Status != "finished" || meta.ExitCode == nil || *meta.ExitCode != 0 || meta.User != "alice" {
 		t.Errorf("meta = %+v", meta)
+	}
+	if out := e.output(id); !strings.Contains(out, "user=alice\n") {
+		t.Errorf("RUNWARDEN_USER not passed to the script:\n%s", out)
 	}
 	if meta.Values["Token"] != "******" || meta.Values["Env"] != "prod" {
 		t.Errorf("values = %v", meta.Values)
@@ -390,6 +432,10 @@ func TestInput(t *testing.T) {
 // dial opens a WebSocket to a run and returns the handshake status code.
 func (e *testEnv) dial(id, query string, header http.Header) (*websocket.Conn, int, error) {
 	url := "ws" + strings.TrimPrefix(e.ts.URL, "http") + "/api/runs/" + id + "/ws" + query
+	if header == nil {
+		header = http.Header{}
+	}
+	e.identify(header)
 	c, resp, err := websocket.Dial(e.t.Context(), url, &websocket.DialOptions{HTTPHeader: header})
 	status := 0
 	if resp != nil {
@@ -502,6 +548,65 @@ func TestOutputFiles(t *testing.T) {
 		if code, _ := e.do(http.MethodGet, "/api/runs/"+id+"/files/"+bad, nil); code != http.StatusNotFound {
 			t.Errorf("file %q = %d, want 404", bad, code)
 		}
+	}
+}
+
+func TestAuthorization(t *testing.T) {
+	alice := setup(t, executor.Limits{}, Options{}) // in group ops
+	bob := alice.as("bob", "")
+	carol := alice.as("carol", "") // admin of Restricted
+	root := alice.as("ROOT", "")   // global admin, matched case-insensitively
+	nobody := alice.as("", "")
+
+	if code, _ := nobody.do(http.MethodGet, "/api/scripts", nil); code != http.StatusUnauthorized {
+		t.Errorf("signed out = %d, want 401", code)
+	}
+
+	_, body := bob.do(http.MethodGet, "/api/scripts", nil)
+	if strings.Contains(string(body), "Restricted") || !strings.Contains(string(body), "Echo") {
+		t.Errorf("bob's script list: %s", body)
+	}
+	if code, _ := bob.do(http.MethodGet, "/api/scripts/Restricted", nil); code != http.StatusNotFound {
+		t.Errorf("bob reads Restricted = %d, want 404", code)
+	}
+	if code, _ := bob.do(http.MethodPost, "/api/scripts/Restricted/runs", map[string]any{}); code != http.StatusNotFound {
+		t.Errorf("bob runs Restricted = %d, want 404", code)
+	}
+
+	id := alice.start("Restricted", nil)
+	alice.finish(id)
+	if out := alice.output(id); !strings.Contains(out, "user=alice") {
+		t.Errorf("alice's output: %s", out)
+	}
+
+	for _, path := range []string{"", "/output", "/files/x.txt"} {
+		if code, _ := bob.do(http.MethodGet, "/api/runs/"+id+path, nil); code != http.StatusNotFound {
+			t.Errorf("bob GET run%s = %d, want 404", path, code)
+		}
+	}
+	if code, _ := bob.do(http.MethodPost, "/api/runs/"+id+"/stop", nil); code != http.StatusNotFound {
+		t.Errorf("bob stops alice's run = %d, want 404", code)
+	}
+	if _, status, err := bob.dial(id, "", nil); err == nil || status != http.StatusNotFound {
+		t.Errorf("bob's WebSocket: status %d, err %v", status, err)
+	}
+	if _, body := bob.do(http.MethodGet, "/api/runs", nil); strings.Contains(string(body), id) {
+		t.Errorf("bob's history lists alice's run: %s", body)
+	}
+
+	for _, viewer := range []*testEnv{alice, carol, root} {
+		if code, _ := viewer.do(http.MethodGet, "/api/runs/"+id, nil); code != http.StatusOK {
+			t.Errorf("%s GET run = %d, want 200", viewer.user, code)
+		}
+		if _, body := viewer.do(http.MethodGet, "/api/runs", nil); !strings.Contains(string(body), id) {
+			t.Errorf("%s's history misses the run", viewer.user)
+		}
+	}
+	// carol administers Restricted only: alice's Echo runs stay private.
+	echo := alice.start("Echo", map[string]any{"Name": "abc"})
+	alice.finish(echo)
+	if code, _ := carol.do(http.MethodGet, "/api/runs/"+echo, nil); code != http.StatusNotFound {
+		t.Errorf("carol GET alice's Echo run = %d, want 404", code)
 	}
 }
 

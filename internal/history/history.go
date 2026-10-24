@@ -143,8 +143,9 @@ func (s *Store) Track(run *executor.Run, meta Meta, files OutputFiles, onDone fu
 
 // Filter narrows List.
 type Filter struct {
-	Script string
-	Limit  int // default 100
+	Script  string
+	Limit   int             // default 100
+	Visible func(Meta) bool // if set, only runs it accepts are listed (applied before Limit)
 }
 
 // List returns runs newest first.
@@ -158,7 +159,7 @@ func (s *Store) List(f Filter) ([]Meta, error) {
 	}
 	var out []Meta
 	for _, m := range all {
-		if f.Script != "" && m.Script != f.Script {
+		if (f.Script != "" && m.Script != f.Script) || (f.Visible != nil && !f.Visible(m)) {
 			continue
 		}
 		out = append(out, m)

@@ -29,7 +29,7 @@ type startBody struct {
 }
 
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
-	sc := s.script(r.PathValue("name"))
+	sc := s.allowedScript(r, r.PathValue("name"))
 	if sc == nil {
 		writeError(w, http.StatusNotFound, "unknown script")
 		return
@@ -63,7 +63,8 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := s.exec.Start(executor.Request{Script: sc, Values: values})
+	user := currentUser(r)
+	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name})
 	switch {
 	case errors.Is(err, executor.ErrBusy):
 		writeError(w, http.StatusTooManyRequests, "too many runs in progress, try again later")
@@ -75,7 +76,6 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	}
 	started = true
 
-	user := userFrom(r.Context())
 	masked := params.MaskValues(sc.Parameters, values)
 	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked}
 	files := history.OutputFiles{Patterns: sc.OutputFiles, Dir: sc.WorkingDirectory}
@@ -249,7 +249,11 @@ func (s *Server) checkDynamicValues(r *http.Request, sc *config.Script, raw map[
 
 func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	runs, err := s.hist.List(history.Filter{Script: r.URL.Query().Get("script"), Limit: limit})
+	runs, err := s.hist.List(history.Filter{
+		Script:  r.URL.Query().Get("script"),
+		Limit:   limit,
+		Visible: func(m history.Meta) bool { return s.canSee(r, m) },
+	})
 	if err != nil {
 		slog.Error("list runs", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not read history")
@@ -261,10 +265,11 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-// runMeta returns a run's record, with the live status while the history is still catching up.
-func (s *Server) runMeta(id string) (history.Meta, bool) {
+// runMeta returns a run's record if the requesting user may see it, with the live status while
+// the history is still catching up. Unknown and hidden runs look the same.
+func (s *Server) runMeta(r *http.Request, id string) (history.Meta, bool) {
 	meta, err := s.hist.Get(id)
-	if err != nil {
+	if err != nil || !s.canSee(r, meta) {
 		return history.Meta{}, false
 	}
 	if run := s.exec.Get(id); run != nil {
@@ -279,7 +284,7 @@ func (s *Server) runMeta(id string) (history.Meta, bool) {
 }
 
 func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
-	meta, ok := s.runMeta(r.PathValue("id"))
+	meta, ok := s.runMeta(r, r.PathValue("id"))
 	if !ok {
 		writeError(w, http.StatusNotFound, "unknown run")
 		return
@@ -291,6 +296,10 @@ func (s *Server) runOutput(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	offset = max(offset, 0)
+	if _, ok := s.runMeta(r, id); !ok {
+		writeError(w, http.StatusNotFound, "unknown run")
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
@@ -326,7 +335,7 @@ type inputBody struct {
 }
 
 func (s *Server) runInput(w http.ResponseWriter, r *http.Request) {
-	run, ok := s.liveRun(w, r.PathValue("id"))
+	run, ok := s.liveRun(w, r)
 	if !ok {
 		return
 	}
@@ -354,7 +363,7 @@ func (s *Server) runInput(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runSignal(w http.ResponseWriter, r *http.Request) {
-	run, ok := s.liveRun(w, r.PathValue("id"))
+	run, ok := s.liveRun(w, r)
 	if !ok {
 		return
 	}
@@ -369,22 +378,27 @@ func (s *Server) runSignal(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// liveRun finds a running run, answering 404 for unknown runs and 409 for finished ones.
-func (s *Server) liveRun(w http.ResponseWriter, id string) (*executor.Run, bool) {
-	run := s.exec.Get(id)
-	if run != nil && run.Result().Status == executor.StatusRunning {
-		return run, true
-	}
-	if _, err := s.hist.Get(id); err == nil || run != nil {
-		writeError(w, http.StatusConflict, "the run has finished")
+// liveRun finds a running run the user may control, answering 404 for unknown or hidden runs
+// and 409 for finished ones.
+func (s *Server) liveRun(w http.ResponseWriter, r *http.Request) (*executor.Run, bool) {
+	id := r.PathValue("id")
+	if _, ok := s.runMeta(r, id); !ok {
+		writeError(w, http.StatusNotFound, "unknown run")
 		return nil, false
 	}
-	writeError(w, http.StatusNotFound, "unknown run")
+	if run := s.exec.Get(id); run != nil && run.Result().Status == executor.StatusRunning {
+		return run, true
+	}
+	writeError(w, http.StatusConflict, "the run has finished")
 	return nil, false
 }
 
 func (s *Server) runFile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("file")
+	if _, ok := s.runMeta(r, r.PathValue("id")); !ok {
+		writeError(w, http.StatusNotFound, "unknown file")
+		return
+	}
 	f, err := s.hist.OpenFile(r.PathValue("id"), name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "unknown file")
