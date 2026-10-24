@@ -10,7 +10,8 @@ done
 echo "Environment:"
 env | grep -E '^(PARAM_|STORAGE_TOKEN=|EXECUTION_ID=)' | sort | sed 's/^/  /' || true
 
-if [ ! -t 0 ]; then
+# Stdin stays open for interactive input, so read at most one line and don't wait long.
+if read -r -t 1 line; then
   echo "Stdin:"
-  sed 's/^/  /'
+  echo "  $line"
 fi
