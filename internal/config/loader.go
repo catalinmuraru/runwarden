@@ -314,11 +314,16 @@ func (l *loader) buildParam(file string, data json.RawMessage) (*params.Paramete
 		ExcludedFiles:     rp.ExcludedFiles,
 		StdinExpectedText: rp.StdinExpectedText,
 	}
-	if p.Type == "" {
+	switch lower := strings.ToLower(rp.Type); lower {
+	case "":
 		p.Type = params.TypeText
+	case "ip", "ip4", "ip6", "ipv4", "ipv6":
+		p.Type = params.Type(strings.ReplaceAll(lower, "v", ""))
 	}
 	if !params.KnownType(p.Type) {
-		return nil, fail("unknown type %q", rp.Type)
+		// Existing configs rely on unknown types behaving as free text.
+		l.warnf(file, "parameter %q: unknown type %q, treated as text", p.Name, rp.Type)
+		p.Type = params.TypeText
 	}
 	if rp.Separator != nil {
 		p.Separator = *rp.Separator
