@@ -76,6 +76,30 @@ Validate a runners directory before deploying it:
 go run ./cmd/runwarden check-config path/to/runners
 ```
 
+## Execution
+
+- Scripts are started directly (`script_path` plus arguments), never through a shell. Each run
+  gets its own process group; stop sends `SIGTERM` to the whole group and `SIGKILL` after a
+  grace period. A run ends when its main process exits; leftover background children are
+  terminated.
+- stdout and stderr are combined in order. Output is stored per run (readers can follow it live)
+  and every `secure` value is replaced by `******` before it is stored.
+- stdin stays open for interactive answers; `pass_as: stdin` values are written at start or,
+  with `stdin_expected_text`, once that text appears in the output. Scripts run without a
+  terminal, so prompts printed by `read -p` are not shown; print prompts with `printf` instead.
+- Environment: scripts never inherit Runwarden's environment. They get `PATH`, `HOME`, `LANG`,
+  `TZ` (defaults `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+  `LANG=C.UTF-8`), every `RUNNER_ENV_<NAME>` variable as `<NAME>`, `EXECUTION_ID`, and their
+  parameter variables. Parameters cannot set `PATH`, `HOME`, `IFS`, `ENV`, `BASH_ENV`,
+  `LD_*` and similar variables.
+
+| Limit | Default |
+|---|---|
+| Concurrent runs | 10 |
+| Run time | 60 minutes |
+| Grace between `SIGTERM` and `SIGKILL` | 10 seconds |
+| Stored output per run | 10 MiB (the script keeps running; output is marked truncated) |
+
 ## Security model
 
 - Scripts are executed directly with an argument array, never through a shell-built command line.
@@ -128,6 +152,7 @@ Without a UI build the binary still compiles; `/` then answers 503 with a hint.
 cmd/runwarden/     entry point and check-config command
 internal/config/   runner config loader
 internal/params/   parameter model, validation, argument/env/stdin building
+internal/executor/ process lifecycle, output, stdin, limits
 internal/web/      embedded UI (built into internal/web/dist/)
 examples/          example runner configs and scripts
 web/               Vue 3 + Vite + TypeScript source
