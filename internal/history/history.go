@@ -96,6 +96,9 @@ func (s *Store) Track(run *executor.Run, meta Meta, files OutputFiles, onDone fu
 	}
 	meta.ID = run.ID
 	meta.Started = run.Started
+	if meta.Args == nil {
+		meta.Args = []string{} // clients get [] rather than null for runs without arguments
+	}
 	meta.Status = string(executor.StatusRunning)
 	if err := s.writeMeta(meta); err != nil {
 		return err

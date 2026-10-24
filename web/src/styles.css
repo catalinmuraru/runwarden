@@ -127,3 +127,10 @@ dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1r
 dl.meta dt { color: var(--muted); }
 dl.meta dd { margin: 0; overflow-wrap: anywhere; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 640px) {
+  .header-row { flex-wrap: wrap; height: auto; gap: 0.25rem 1rem; padding-top: 0.5rem; padding-bottom: 0.5rem; }
+  .user { margin-left: 0; width: 100%; }
+  h1 { font-size: 1.3rem; }
+  .terminal-wrap { height: 50vh; }
+}

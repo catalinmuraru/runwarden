@@ -19,6 +19,14 @@ var dist embed.FS
 const contentSecurityPolicy = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
 	"frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
+// staticExt lists extensions of files, as opposed to pages: a missing one is a 404 rather than
+// the app. Page paths may contain dots too (run IDs do), so this can't be "any extension".
+var staticExt = map[string]bool{
+	".js": true, ".mjs": true, ".css": true, ".map": true, ".json": true, ".txt": true, ".xml": true,
+	".ico": true, ".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".webp": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".wasm": true,
+}
+
 // Handler serves the built UI, or 503 with a hint if the UI was not built.
 func Handler() http.Handler {
 	root, err := fs.Sub(dist, "dist")
@@ -57,7 +65,7 @@ func handlerFor(root fs.FS) http.Handler {
 				files.ServeHTTP(w, r)
 				return
 			}
-			if path.Ext(name) != "" {
+			if strings.HasPrefix(name, "assets/") || staticExt[strings.ToLower(path.Ext(name))] {
 				http.NotFound(w, r) // a missing file, not a page
 				return
 			}

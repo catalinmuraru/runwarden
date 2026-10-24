@@ -76,7 +76,9 @@ onMounted(load)
     <div class="browser" role="listbox" :aria-label="`${param.name} files`">
       <p v-if="loading" class="muted" style="padding: 0.3rem 0.6rem">Loading…</p>
       <p v-else-if="error" class="error" style="padding: 0.3rem 0.6rem">{{ error }}</p>
-      <p v-else-if="entries.length === 0" class="muted" style="padding: 0.3rem 0.6rem">Empty</p>
+      <p v-else-if="entries.length === 0" class="muted" style="padding: 0.3rem 0.6rem">
+        {{ pickDirs ? 'No subfolders' : 'No matching files' }}
+      </p>
       <button
         v-for="e in entries"
         :key="e.name"
