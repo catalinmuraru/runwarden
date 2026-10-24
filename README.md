@@ -46,7 +46,8 @@ through a shell), `working_directory`, `description`, `group`, `allowed_users` /
 include).
 
 **Parameter types:** `text` (default), `int`, `list`, `multiselect`, `editable_list`,
-`multiline_text`, `file_upload`, `server_file`, `ip`, `ip4`, `ip6`; flags use `no_value: true`.
+`multiline_text`, `file_upload`, `server_file`, `ip`, `ip4`, `ip6` (also `ipv4` / `ipv6`, any
+case); flags use `no_value: true`. Unknown types are treated as `text`, with a warning.
 
 **Validation:** `required`, `min` / `max`, `max_length`, `regex` (`{"pattern", "description"}`,
 whole-value match), allowed `values` (static list or `{"script": "cmd ${Other}"}`), server file

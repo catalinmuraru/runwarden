@@ -165,7 +165,7 @@ func TestLoadErrorsDoNotBlockOtherFiles(t *testing.T) {
 		"bad_json.json":       `{`,
 		"bad_bool.json":       `{"name": "B", "script_path": "run.sh", "parameters": [{"name": "x", "required": 5}]}`,
 		"no_default.json":     `{"name": "C", "script_path": "run.sh", "parameters": [{"name": "x", "constant": true}]}`,
-		"unknown_type.json":   `{"name": "D", "script_path": "run.sh", "parameters": [{"name": "x", "type": "date"}]}`,
+		"unknown_type.json":   `{"name": "D", "script_path": "run.sh", "parameters": [{"name": "x", "type": "integer"}, {"name": "y", "type": "IPv4"}]}`,
 		"zz_duplicate.json":   `{"name": "Good", "script_path": "other.sh"}`, // loads after good.json
 		"bad_regex.json":      `{"name": "E", "script_path": "run.sh", "parameters": [{"name": "x", "regex": {"pattern": "(?=x)"}}]}`,
 		"no_script.json":      `{"name": "F"}`,
@@ -191,32 +191,35 @@ func TestLoadErrorsDoNotBlockOtherFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, want := scriptNames(cat), []string{"Good", "K", "L", "Nested", "Templated"}; !slices.Equal(got, want) {
+	if got, want := scriptNames(cat), []string{"D", "Good", "K", "L", "Nested", "Templated"}; !slices.Equal(got, want) {
 		t.Errorf("scripts = %q, want %q", got, want)
 	}
 	failed := map[string]bool{}
 	for _, e := range cat.Errors {
 		failed[filepath.Base(e.File)] = true
 	}
-	for _, name := range []string{"bad_json.json", "bad_bool.json", "no_default.json", "unknown_type.json",
+	for _, name := range []string{"bad_json.json", "bad_bool.json", "no_default.json",
 		"zz_duplicate.json", "bad_regex.json", "no_script.json", "no_file_dir.json", "dup_param.json",
 		"bad_mode.json", "bad_quote.json"} {
 		if !failed[name] {
 			t.Errorf("expected an error for %s; errors: %v", name, cat.Errors)
 		}
 	}
-	if len(cat.Errors) != 11 {
-		t.Errorf("got %d errors, want 11: %v", len(cat.Errors), cat.Errors)
+	if len(cat.Errors) != 10 {
+		t.Errorf("got %d errors, want 10: %v", len(cat.Errors), cat.Errors)
 	}
 
 	warned := map[string]bool{}
 	for _, w := range cat.Warnings {
 		warned[filepath.Base(w.File)] = true
 	}
-	for _, name := range []string{"templated.json", "shell_values.json", "unknown_passas.json"} {
+	for _, name := range []string{"templated.json", "shell_values.json", "unknown_passas.json", "unknown_type.json"} {
 		if !warned[name] {
 			t.Errorf("expected a warning for %s; warnings: %v", name, cat.Warnings)
 		}
+	}
+	if s := cat.Script("D"); s == nil || s.Parameters[0].Type != params.TypeText || s.Parameters[1].Type != params.TypeIP4 {
+		t.Errorf("unknown type must become text and IPv4 must become ip4: %+v", s)
 	}
 	if s := cat.Script("Good"); s == nil || filepath.Base(s.Command[0]) != "run.sh" {
 		t.Errorf("first definition of a duplicate name must win: %+v", s)
