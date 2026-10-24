@@ -188,7 +188,8 @@ func (e *Executor) nextID() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.seq++
-	return fmt.Sprintf("%s-%04d", time.Now().UTC().Format("20060102-150405"), e.seq%10000)
+	// Sortable by start time; milliseconds keep IDs unique across restarts.
+	return fmt.Sprintf("%s-%04d", time.Now().UTC().Format("20060102-150405.000"), e.seq%10000)
 }
 
 // Get returns a known run, or nil.

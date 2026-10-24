@@ -4,6 +4,9 @@
 *.test
 *.out
 
+# Local run history and uploads (DATA_DIR default)
+/data/
+
 # Built UI, embedded by internal/web; .gitkeep keeps go:embed compiling before a build
 /internal/web/dist/*
 !/internal/web/dist/.gitkeep

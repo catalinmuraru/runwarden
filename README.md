@@ -100,6 +100,75 @@ go run ./cmd/runwarden check-config path/to/runners
 | Grace between `SIGTERM` and `SIGKILL` | 10 seconds |
 | Stored output per run | 10 MiB (the script keeps running; output is marked truncated) |
 
+## Configuration
+
+All settings come from environment variables. Secrets are never read from files.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LISTEN_ADDR` | `:8080` | HTTP listen address |
+| `RUNNERS_DIR` | `./runners` | directory with runner configs (scanned recursively) |
+| `BASE_DIR` | working directory | base for relative paths inside runner configs |
+| `DATA_DIR` | `./data` | run history and temporary uploads |
+| `MAX_CONCURRENT_RUNS` | `10` | runs beyond this are rejected with `429` |
+| `RUN_TIMEOUT` | `60m` | default time limit per run |
+| `KILL_GRACE` | `10s` | wait between `SIGTERM` and `SIGKILL` |
+| `MAX_OUTPUT_BYTES` | `10Mi` | stored output per run (`Ki`, `Mi`, `Gi` suffixes) |
+| `MAX_UPLOAD_BYTES` | `100Mi` | maximum upload request size |
+| `ALLOWED_ORIGINS` | – | extra hosts allowed to open WebSockets, comma-separated (`ops.example.com,*.example.org`); the server's own host is always allowed |
+| `RUNNER_ENV_<NAME>` | – | passed to scripts as `<NAME>` |
+
+Send `SIGHUP` to reload runner configs without a restart. `GET /healthz` is liveness;
+`GET /readyz` reports ready once runner configs are loaded.
+
+> **No authentication yet.** Until authentication is added, anyone who can reach the server can
+> run every script. Only run it on localhost or a trusted network.
+
+## API
+
+JSON over HTTP. Errors look like `{"error": "...", "details": ["..."]}`; validation errors name
+the parameter but never echo the submitted value.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/scripts` | list scripts |
+| `GET /api/scripts/{name}` | script with its parameters (form description) |
+| `GET /api/scripts/{name}/parameters/{param}/values?Other=value` | allowed values; for script-provided lists, pass the parameters it depends on |
+| `POST /api/scripts/{name}/runs` | start a run: JSON `{"values": {...}}`, or `multipart/form-data` with a `values` JSON field plus one file per `file_upload` parameter. `201 {"id"}`, `400` invalid values, `429` busy |
+| `GET /api/runs?script=&limit=` | run history, newest first |
+| `GET /api/runs/{id}` | run status and details (secure values masked) |
+| `GET /api/runs/{id}/output?offset=N` | output from byte `N`; `X-Next-Offset` and `X-Run-Finished` headers |
+| `POST /api/runs/{id}/input` | `{"line": "yes"}` writes a line to stdin; `{"close": true}` closes stdin |
+| `POST /api/runs/{id}/stop` / `kill` | stop (SIGTERM, then SIGKILL) or kill immediately |
+| `GET /api/runs/{id}/files/{name}` | download a file listed in the run's `files` |
+| `GET /api/runs/{id}/ws?offset=N` | WebSocket, see below |
+
+WebSocket messages from the server: `{"type":"output","data":"...","offset":N}` (resume later
+with `?offset=N`), then `{"type":"result","status":"finished","exit_code":0}`. While the run is
+live, the client may send `{"type":"input","line":"..."}`, `{"type":"close_input"}`,
+`{"type":"stop"}` or `{"type":"kill"}`.
+
+Run statuses: `running`, `finished`, `failed`, `stopped`, `killed`, `timed_out`, and
+`interrupted` (the server stopped while the run was in progress).
+
+```bash
+# Start a run
+curl -X POST http://localhost:8080/api/scripts/Restart%20Service/runs \
+  -H 'Content-Type: application/json' -d '{"values": {"Service": "api"}}'
+# → {"id":"20261024-092457.815-0001","status":"running"}
+
+# Follow it live
+websocat ws://localhost:8080/api/runs/20261024-092457.815-0001/ws
+
+# Upload a file for a file_upload parameter
+curl -X POST http://localhost:8080/api/scripts/Backup%20Database/runs \
+  -F 'values={"Database":"orders","Encryption key":"…"}' -F 'Manifest=@manifest.txt'
+```
+
+Every action (start, input, stop, kill) is also written to the log as a structured line with
+`"audit": true`, the user, the script, the run ID and the masked parameter values. History is
+stored under `DATA_DIR/history/<run-id>/` (`meta.json`, `output.log`, `files/`).
+
 ## Security model
 
 - Scripts are executed directly with an argument array, never through a shell-built command line.
@@ -128,8 +197,8 @@ and Docker plus `kind` for cluster testing.
 # Build the UI (output is embedded into the binary)
 cd web && npm ci && npm run build && cd ..
 
-# Run the server on :8080 (override with LISTEN_ADDR)
-go run ./cmd/runwarden
+# Run the server on :8080 with the example scripts
+RUNNERS_DIR=examples/runners go run ./cmd/runwarden
 
 # UI with hot reload, proxying /api to the server above
 cd web && npm run dev
@@ -153,6 +222,8 @@ cmd/runwarden/     entry point and check-config command
 internal/config/   runner config loader
 internal/params/   parameter model, validation, argument/env/stdin building
 internal/executor/ process lifecycle, output, stdin, limits
+internal/history/  run records on disk
+internal/api/      REST and WebSocket API
 internal/web/      embedded UI (built into internal/web/dist/)
 examples/          example runner configs and scripts
 web/               Vue 3 + Vite + TypeScript source

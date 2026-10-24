@@ -57,6 +57,29 @@ func Build(ps []*Parameter, values map[string]Value, executionID string) Invocat
 	return inv
 }
 
+// MaskValues renders values for history and audit: scalars as strings, lists as string
+// slices, flags as booleans, and secure values as Mask.
+func MaskValues(ps []*Parameter, values map[string]Value) map[string]any {
+	out := map[string]any{}
+	for _, p := range ps {
+		v, ok := values[p.Name]
+		if !ok || v.Kind == KindNone {
+			continue
+		}
+		switch {
+		case v.Kind == KindFlag:
+			out[p.Name] = v.Flag
+		case p.Secure:
+			out[p.Name] = Mask
+		case v.Kind == KindList:
+			out[p.Name] = append([]string{}, v.List...)
+		default:
+			out[p.Name] = v.Str
+		}
+	}
+	return out
+}
+
 // scriptValue maps a server_file selection to the path the script receives.
 func (p *Parameter) scriptValue(v Value) Value {
 	if p.Type != TypeServerFile || v.IsEmpty() {

@@ -1,0 +1,17 @@
+{
+  "name": "Echo",
+  "script_path": "testdata/scripts/echo.sh",
+  "working_directory": ".",
+  "group": "Test",
+  "description": "Prints its arguments and the content of an uploaded file.",
+  "parameters": [
+    { "name": "Name", "param": "--name", "required": true,
+      "regex": { "pattern": "[a-z]+", "description": "lowercase letters" } },
+    { "name": "Token", "param": "--token", "secure": true, "default": "default-secret" },
+    { "name": "Env", "type": "list", "values": ["dev", "prod"], "default": "dev",
+      "values_ui_mapping": { "prod": "Production" } },
+    { "name": "Target", "type": "list", "param": "--target",
+      "values": { "script": "testdata/scripts/targets.sh ${Env}" } },
+    { "name": "Upload", "type": "file_upload", "param": "--file" }
+  ]
+}
