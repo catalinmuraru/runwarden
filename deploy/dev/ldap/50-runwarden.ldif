@@ -1,0 +1,28 @@
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=alice,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: alice
+cn: Alice Example
+sn: Example
+mail: alice@example.org
+userPassword: alice-password
+
+dn: uid=bob,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: bob
+cn: Bob Example
+sn: Example
+mail: bob@example.org
+userPassword: bob-password
+
+dn: cn=ops,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: ops
+member: uid=alice,ou=people,dc=example,dc=org

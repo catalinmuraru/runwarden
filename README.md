@@ -121,8 +121,64 @@ All settings come from environment variables. Secrets are never read from files.
 Send `SIGHUP` to reload runner configs without a restart. `GET /healthz` is liveness;
 `GET /readyz` reports ready once runner configs are loaded.
 
-> **No authentication yet.** Until authentication is added, anyone who can reach the server can
-> run every script. Only run it on localhost or a trusted network.
+## Authentication and authorization
+
+`AUTH_TYPE` selects how users sign in; the server refuses to start without it.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AUTH_TYPE` | **required** | `oidc`, `gitlab`, `ldap`, or `none` (local development only: no sign-in, everyone is an admin) |
+| `PUBLIC_URL` | – | external URL, e.g. `https://runwarden.example.com` (oidc, gitlab); the callback is `PUBLIC_URL/auth/callback` |
+| `SESSION_KEY` | – | 32 random bytes, base64 (`openssl rand -base64 32`); required unless `none` |
+| `SESSION_TTL` | `12h` | how long a sign-in lasts |
+| `COOKIE_SECURE` | `true` (`false` if `PUBLIC_URL` is `http://`) | `Secure` flag on cookies |
+| `ADMIN_USERS`, `ADMIN_GROUPS` | – | global admins, comma-separated |
+| `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | – | OpenID Connect client (confidential, authorization code flow) |
+| `OIDC_SCOPES` | `openid profile email` | extra scopes, space-separated (e.g. `groups`) |
+| `OIDC_USERNAME_CLAIM`, `OIDC_GROUPS_CLAIM` | `preferred_username`, `groups` | claims read from the ID token, then userinfo |
+| `GITLAB_URL`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | `https://gitlab.com` | GitLab application (scopes `openid profile email`); user name from `nickname`, groups (full paths) from `groups`, falling back to `groups_direct` |
+| `LDAP_URL` | – | `ldaps://host:636` or `ldap://host:389` (with `LDAP_START_TLS=true`) |
+| `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD` | – | service account used to find users |
+| `LDAP_USER_BASE_DN`, `LDAP_USER_FILTER` | –, `(uid={username})` | where and how to find a user |
+| `LDAP_GROUP_BASE_DN`, `LDAP_GROUP_FILTER`, `LDAP_GROUP_NAME_ATTR` | –, `(member={dn})`, `cn` | group search |
+| `LDAP_USER_GROUPS_ATTR` | – | instead of a group search, read group DNs from this user attribute (e.g. `memberOf`) |
+
+Sign-in:
+
+- OIDC and GitLab: `GET /auth/login?next=/path` redirects to the provider (authorization code flow
+  with PKCE, nonce and state checks); the provider returns to `/auth/callback`.
+- LDAP: `POST /auth/login` with `{"username": "...", "password": "..."}`. After 5 failed attempts
+  for a user name from one address, further attempts are refused for 15 minutes.
+- `GET /api/me` returns the signed-in user; `POST /auth/logout` signs out (and returns the
+  provider's logout URL when there is one).
+
+Sessions are encrypted cookies (AES-256-GCM, `HttpOnly`, `SameSite=Lax`). API requests without a
+session get `401`; state-changing requests from other sites are refused with `403`.
+
+Who may do what, from each runner config:
+
+| Setting | Meaning |
+|---|---|
+| `allowed_users` | who may see and run the script: user names, `@group`, or `*` for every signed-in user. Missing means everyone; an empty list means only admins. |
+| `admin_users` | who may see and stop every run of the script. Missing means only global admins. |
+
+Users always see and control their own runs. Global admins may do everything. Names and groups
+match case-insensitively. Scripts and runs a user may not see answer `404`. The signed-in user
+is passed to scripts as `RUNWARDEN_USER`.
+
+### Local identity providers
+
+`deploy/dev/compose.yaml` starts Keycloak (`http://localhost:8180`, realm `runwarden`) and
+OpenLDAP (`ldap://localhost:1389`) with test users `alice` (group `ops`) and `bob`.
+`deploy/dev/test-auth.sh` starts them, runs the auth integration tests and stops them again.
+
+```bash
+docker compose -f deploy/dev/compose.yaml up -d
+AUTH_TYPE=oidc PUBLIC_URL=http://localhost:8080 SESSION_KEY=$(openssl rand -base64 32) \
+  OIDC_ISSUER_URL=http://localhost:8180/realms/runwarden OIDC_CLIENT_ID=runwarden \
+  OIDC_CLIENT_SECRET=dev-client-secret RUNNERS_DIR=examples/runners go run ./cmd/runwarden
+# open http://localhost:8080/auth/login and sign in as alice / alice-password
+```
 
 ## API
 
@@ -150,6 +206,10 @@ live, the client may send `{"type":"input","line":"..."}`, `{"type":"close_input
 
 Run statuses: `running`, `finished`, `failed`, `stopped`, `killed`, `timed_out`, and
 `interrupted` (the server stopped while the run was in progress).
+
+The examples below assume `AUTH_TYPE=none`; otherwise sign in first and send the session
+cookie (for LDAP: `curl -c cookies.txt -X POST .../auth/login -d '{"username":..,"password":..}'`,
+then `-b cookies.txt` on every call).
 
 ```bash
 # Start a run
@@ -197,8 +257,8 @@ and Docker plus `kind` for cluster testing.
 # Build the UI (output is embedded into the binary)
 cd web && npm ci && npm run build && cd ..
 
-# Run the server on :8080 with the example scripts
-RUNNERS_DIR=examples/runners go run ./cmd/runwarden
+# Run the server on :8080 with the example scripts, without sign-in (local only)
+AUTH_TYPE=none RUNNERS_DIR=examples/runners go run ./cmd/runwarden
 
 # UI with hot reload, proxying /api to the server above
 cd web && npm run dev
@@ -224,6 +284,9 @@ internal/params/   parameter model, validation, argument/env/stdin building
 internal/executor/ process lifecycle, output, stdin, limits
 internal/history/  run records on disk
 internal/api/      REST and WebSocket API
+internal/auth/     sign-in (OIDC, GitLab, LDAP) and sessions
+internal/authz/    who may run scripts and see runs
+deploy/dev/        local Keycloak and OpenLDAP for development
 internal/web/      embedded UI (built into internal/web/dist/)
 examples/          example runner configs and scripts
 web/               Vue 3 + Vite + TypeScript source

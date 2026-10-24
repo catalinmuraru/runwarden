@@ -5,8 +5,11 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 
+	"github.com/catalinmuraru/runwarden/internal/auth"
+	"github.com/catalinmuraru/runwarden/internal/authz"
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
@@ -18,6 +21,10 @@ type Options struct {
 	DataDir        string   // uploads go to DataDir/uploads
 	MaxUploadBytes int64    // per request
 	AllowedOrigins []string // extra hosts allowed to open WebSockets (same host always is)
+	// Authenticate attaches the signed-in user (auth.WithUser) or rejects the request.
+	// Without it every API request is rejected.
+	Authenticate func(http.Handler) http.Handler
+	Policy       authz.Policy
 }
 
 // Server serves the API.
@@ -50,9 +57,52 @@ func (s *Server) script(name string) *config.Script {
 	return c.Script(name)
 }
 
+// allowedScript returns the script if the requesting user may run it. Unknown and forbidden
+// scripts look the same to the client.
+func (s *Server) allowedScript(r *http.Request, name string) *config.Script {
+	sc := s.script(name)
+	if sc == nil || !s.opts.Policy.CanRun(currentUser(r), sc) {
+		return nil
+	}
+	return sc
+}
+
+// canSee reports whether the requesting user may see and control a run.
+func (s *Server) canSee(r *http.Request, meta history.Meta) bool {
+	return s.opts.Policy.CanSeeRun(currentUser(r), meta.User, s.script(meta.Script))
+}
+
+// ReferencedGroups lists the groups that runner configs and admin settings refer to.
+func (s *Server) ReferencedGroups() []string {
+	groups := append([]string(nil), s.opts.Policy.AdminGroups...)
+	if c := s.catalog.Load(); c != nil {
+		for _, sc := range c.Scripts {
+			for _, e := range append(append([]string(nil), sc.AllowedUsers...), sc.AdminUsers...) {
+				if g, ok := strings.CutPrefix(strings.TrimSpace(e), "@"); ok {
+					groups = append(groups, g)
+				}
+			}
+		}
+	}
+	return groups
+}
+
+func currentUser(r *http.Request) auth.User {
+	u, _ := auth.UserFrom(r.Context())
+	return u
+}
+
 // Register adds the API routes to mux.
 func (s *Server) Register(mux *http.ServeMux) {
-	h := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, withUser(fn)) }
+	authenticate := s.opts.Authenticate
+	if authenticate == nil {
+		authenticate = func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeError(w, http.StatusUnauthorized, "sign in required")
+			})
+		}
+	}
+	h := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, authenticate(fn)) }
 	h("GET /api/scripts", s.listScripts)
 	h("GET /api/scripts/{name}", s.getScript)
 	h("GET /api/scripts/{name}/parameters/{param}/values", s.parameterValues)
@@ -73,6 +123,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 
 // audit writes one structured line per user action.
 func audit(r *http.Request, action string, attrs ...any) {
-	attrs = append([]any{"audit", true, "action", action, "user", userFrom(r.Context()).Name}, attrs...)
+	attrs = append([]any{"audit", true, "action", action, "user", currentUser(r).Name}, attrs...)
 	slog.Info("audit", attrs...)
 }

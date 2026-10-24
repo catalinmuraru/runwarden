@@ -26,7 +26,7 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string) ([
 	ctx, cancel := context.WithTimeout(ctx, captureTimeout)
 	defer cancel()
 
-	env, _ := e.env.build(nil)
+	env, _ := e.env.build(nil, nil)
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // argv from config, no shell
 	cmd.Dir = dir
 	cmd.Env = env

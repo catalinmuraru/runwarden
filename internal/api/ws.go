@@ -51,13 +51,11 @@ type wsError struct {
 // the client can send input and stop or kill it.
 func (s *Server) runSocket(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	run := s.exec.Get(id)
-	if run == nil {
-		if _, err := s.hist.Get(id); err != nil {
-			writeError(w, http.StatusNotFound, "unknown run")
-			return
-		}
+	if _, ok := s.runMeta(r, id); !ok {
+		writeError(w, http.StatusNotFound, "unknown run")
+		return
 	}
+	run := s.exec.Get(id)
 	// Accept rejects cross-origin requests unless the host is in AllowedOrigins.
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.opts.AllowedOrigins})
 	if err != nil {
@@ -73,10 +71,10 @@ func (s *Server) runSocket(w http.ResponseWriter, r *http.Request) {
 
 	if run != nil {
 		go s.socketCommands(ctx, cancel, c, run, r)
-		err = s.streamLive(ctx, c, run, offset)
+		err = s.streamLive(ctx, c, r, run, offset)
 	} else {
 		ctx = c.CloseRead(ctx)
-		err = s.streamStored(ctx, c, id, offset)
+		err = s.streamStored(ctx, c, r, id, offset)
 	}
 	if err == nil {
 		_ = c.Close(websocket.StatusNormalClosure, "")
@@ -112,7 +110,7 @@ func (s *Server) socketCommands(ctx context.Context, cancel context.CancelFunc, 
 	}
 }
 
-func (s *Server) streamLive(ctx context.Context, c *websocket.Conn, run *executor.Run, offset int) error {
+func (s *Server) streamLive(ctx context.Context, c *websocket.Conn, r *http.Request, run *executor.Run, offset int) error {
 	ping := time.NewTicker(wsPingInterval)
 	defer ping.Stop()
 	for {
@@ -128,7 +126,7 @@ func (s *Server) streamLive(ctx context.Context, c *websocket.Conn, run *executo
 		}
 		offset = next
 		if done {
-			return s.sendResult(ctx, c, run.ID)
+			return s.sendResult(ctx, c, r, run.ID)
 		}
 		select {
 		case <-changed:
@@ -142,10 +140,10 @@ func (s *Server) streamLive(ctx context.Context, c *websocket.Conn, run *executo
 	}
 }
 
-func (s *Server) streamStored(ctx context.Context, c *websocket.Conn, id string, offset int) error {
+func (s *Server) streamStored(ctx context.Context, c *websocket.Conn, r *http.Request, id string, offset int) error {
 	f, err := s.hist.OpenOutput(id)
 	if err != nil {
-		return s.sendResult(ctx, c, id)
+		return s.sendResult(ctx, c, r, id)
 	}
 	defer func() { _ = f.Close() }()
 	if _, err := f.Seek(int64(offset), io.SeekStart); err != nil {
@@ -158,7 +156,7 @@ func (s *Server) streamStored(ctx context.Context, c *websocket.Conn, id string,
 	if err := sendOutput(ctx, c, data, offset); err != nil {
 		return err
 	}
-	return s.sendResult(ctx, c, id)
+	return s.sendResult(ctx, c, r, id)
 }
 
 // sendOutput sends data in chunks that end on whole UTF-8 characters.
@@ -179,8 +177,8 @@ func sendOutput(ctx context.Context, c *websocket.Conn, data []byte, offset int)
 	return nil
 }
 
-func (s *Server) sendResult(ctx context.Context, c *websocket.Conn, id string) error {
-	meta, ok := s.runMeta(id)
+func (s *Server) sendResult(ctx context.Context, c *websocket.Conn, r *http.Request, id string) error {
+	meta, ok := s.runMeta(r, id)
 	if !ok {
 		return wsjson.Write(ctx, c, wsError{Type: "error", Message: "unknown run"})
 	}

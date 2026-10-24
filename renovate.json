@@ -6,7 +6,7 @@
     "docker:pinDigests",
     "helpers:pinGitHubActionDigests"
   ],
-  "enabledManagers": ["gomod", "npm", "nvm", "dockerfile", "github-actions", "helm-values", "helmv3"],
+  "enabledManagers": ["gomod", "npm", "nvm", "dockerfile", "docker-compose", "github-actions", "helm-values", "helmv3"],
   "postUpdateOptions": ["gomodTidy"],
   "minimumReleaseAge": "3 days",
   "vulnerabilityAlerts": {
@@ -29,7 +29,7 @@
       "groupName": "npm (non-major)"
     },
     {
-      "matchManagers": ["dockerfile"],
+      "matchManagers": ["dockerfile", "docker-compose"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "Docker images (non-major)"
     },

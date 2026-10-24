@@ -14,7 +14,7 @@ func env(vars map[string]string) func(string) string {
 }
 
 func TestLoadAppDefaults(t *testing.T) {
-	app, err := LoadApp(env(nil))
+	app, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +37,7 @@ func TestLoadAppDefaults(t *testing.T) {
 
 func TestLoadAppValues(t *testing.T) {
 	app, err := LoadApp(env(map[string]string{
+		"AUTH_TYPE":           "none",
 		"LISTEN_ADDR":         "127.0.0.1:9000",
 		"RUNNERS_DIR":         "/etc/runwarden/runners",
 		"DATA_DIR":            "/var/lib/runwarden",
@@ -71,6 +72,89 @@ func TestLoadAppInvalid(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error does not mention %s: %v", name, err)
 		}
+	}
+}
+
+const testKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" // 32 bytes
+
+func TestLoadAuth(t *testing.T) {
+	tests := []struct {
+		name    string
+		vars    map[string]string
+		wantErr []string
+		check   func(t *testing.T, a Auth)
+	}{
+		{name: "missing type", vars: nil, wantErr: []string{"AUTH_TYPE is required"}},
+		{name: "unknown type", vars: map[string]string{"AUTH_TYPE": "kerberos"}, wantErr: []string{"unknown value"}},
+		{
+			name:    "oidc missing settings",
+			vars:    map[string]string{"AUTH_TYPE": "oidc"},
+			wantErr: []string{"SESSION_KEY", "PUBLIC_URL", "OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"},
+		},
+		{
+			name:    "bad session key",
+			vars:    map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": "c2hvcnQ=", "LDAP_URL": "ldap://x", "LDAP_USER_BASE_DN": "dc=x"},
+			wantErr: []string{"SESSION_KEY must be 32"},
+		},
+		{
+			name:    "bad ldap settings",
+			vars:    map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": testKey, "LDAP_URL": "http://x", "LDAP_USER_BASE_DN": "dc=x", "LDAP_USER_FILTER": "(uid=fixed)"},
+			wantErr: []string{"LDAP_URL must start", "LDAP_USER_FILTER must contain"},
+		},
+		{
+			name: "oidc",
+			vars: map[string]string{
+				"AUTH_TYPE": "OIDC", "SESSION_KEY": testKey, "PUBLIC_URL": "https://rw.example.com/",
+				"OIDC_ISSUER_URL": "https://idp", "OIDC_CLIENT_ID": "rw", "OIDC_CLIENT_SECRET": "s",
+				"OIDC_SCOPES": "groups openid", "ADMIN_GROUPS": "admins, ops", "SESSION_TTL": "1h",
+			},
+			check: func(t *testing.T, a Auth) {
+				if a.Type != AuthOIDC || a.PublicURL != "https://rw.example.com" || !a.CookieSecure || len(a.SessionKey) != 32 ||
+					a.SessionTTL != time.Hour || !slices.Equal(a.AdminGroups, []string{"admins", "ops"}) ||
+					!slices.Equal(a.OIDC.Scopes, []string{"openid", "profile", "email", "groups"}) ||
+					a.OIDC.UsernameClaim != "preferred_username" || !slices.Equal(a.OIDC.GroupsClaims, []string{"groups"}) {
+					t.Errorf("auth = %+v", a)
+				}
+			},
+		},
+		{
+			name: "gitlab over http",
+			vars: map[string]string{
+				"AUTH_TYPE": "gitlab", "SESSION_KEY": testKey, "PUBLIC_URL": "http://localhost:8080",
+				"GITLAB_URL": "https://gitlab.example.com/", "GITLAB_CLIENT_ID": "rw", "GITLAB_CLIENT_SECRET": "s",
+			},
+			check: func(t *testing.T, a Auth) {
+				if a.CookieSecure || a.OIDC.IssuerURL != "https://gitlab.example.com" || a.OIDC.UsernameClaim != "nickname" ||
+					!slices.Equal(a.OIDC.GroupsClaims, []string{"groups", "groups_direct"}) {
+					t.Errorf("auth = %+v", a)
+				}
+			},
+		},
+		{
+			name: "ldap defaults",
+			vars: map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": testKey, "LDAP_URL": "ldaps://dir", "LDAP_USER_BASE_DN": "ou=people,dc=x"},
+			check: func(t *testing.T, a Auth) {
+				if a.LDAP.UserFilter != "(uid={username})" || a.LDAP.GroupFilter != "(member={dn})" || a.LDAP.GroupNameAttr != "cn" {
+					t.Errorf("ldap = %+v", a.LDAP)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, err := LoadApp(env(tt.vars))
+			for _, want := range tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("error %v does not mention %q", err, want)
+				}
+			}
+			if tt.wantErr == nil && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.check != nil {
+				tt.check(t, app.Auth)
+			}
+		})
 	}
 }
 

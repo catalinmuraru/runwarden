@@ -1,10 +1,13 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +25,52 @@ type App struct {
 	MaxOutputBytes    int64         // MAX_OUTPUT_BYTES, default 10Mi
 	MaxUploadBytes    int64         // MAX_UPLOAD_BYTES, default 100Mi
 	AllowedOrigins    []string      // ALLOWED_ORIGINS, comma-separated hosts allowed for WebSockets
+	Auth              Auth
+}
+
+// Auth types.
+const (
+	AuthOIDC   = "oidc"
+	AuthGitLab = "gitlab"
+	AuthLDAP   = "ldap"
+	AuthNone   = "none"
+)
+
+// Auth configures login and sessions.
+type Auth struct {
+	Type         string        // AUTH_TYPE: oidc, gitlab, ldap or none (required)
+	PublicURL    string        // PUBLIC_URL, e.g. https://runwarden.example.com
+	SessionKey   []byte        // SESSION_KEY: 32 bytes, base64
+	SessionTTL   time.Duration // SESSION_TTL, default 12h
+	CookieSecure bool          // COOKIE_SECURE, default true unless PUBLIC_URL is http
+	AdminUsers   []string      // ADMIN_USERS
+	AdminGroups  []string      // ADMIN_GROUPS
+	OIDC         OIDC
+	LDAP         LDAP
+}
+
+// OIDC configures OpenID Connect login (also used for GitLab).
+type OIDC struct {
+	IssuerURL     string
+	ClientID      string
+	ClientSecret  string
+	Scopes        []string
+	UsernameClaim string
+	GroupsClaims  []string // tried in order; the first one present wins
+}
+
+// LDAP configures LDAP login.
+type LDAP struct {
+	URL            string
+	StartTLS       bool
+	BindDN         string
+	BindPassword   string
+	UserBaseDN     string
+	UserFilter     string // {username} is replaced by the escaped login name
+	GroupBaseDN    string
+	GroupFilter    string // {dn} and {username} are replaced, escaped
+	GroupNameAttr  string
+	UserGroupsAttr string // read groups from this user attribute (e.g. memberOf) instead of searching
 }
 
 // LoadApp reads the configuration through getenv (usually os.Getenv). All problems are
@@ -76,12 +125,134 @@ func LoadApp(getenv func(string) string) (App, error) {
 		MaxOutputBytes:    num("MAX_OUTPUT_BYTES", 10<<20, parseBytes),
 		MaxUploadBytes:    num("MAX_UPLOAD_BYTES", 100<<20, parseBytes),
 	}
-	for _, o := range strings.Split(getenv("ALLOWED_ORIGINS"), ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			app.AllowedOrigins = append(app.AllowedOrigins, o)
+	app.AllowedOrigins = list(getenv("ALLOWED_ORIGINS"))
+	app.Auth = loadAuth(getenv, str, dur, &errs)
+	return app, errors.Join(errs...)
+}
+
+func loadAuth(getenv func(string) string, str func(string, string) string, dur func(string, time.Duration) time.Duration, errs *[]error) Auth {
+	fail := func(format string, args ...any) { *errs = append(*errs, fmt.Errorf(format, args...)) }
+	require := func(name string) string {
+		v := str(name, "")
+		if v == "" {
+			fail("%s is required when AUTH_TYPE=%s", name, str("AUTH_TYPE", ""))
+		}
+		return v
+	}
+
+	a := Auth{
+		Type:        strings.ToLower(str("AUTH_TYPE", "")),
+		PublicURL:   strings.TrimRight(str("PUBLIC_URL", ""), "/"),
+		SessionTTL:  dur("SESSION_TTL", 12*time.Hour),
+		AdminUsers:  list(getenv("ADMIN_USERS")),
+		AdminGroups: list(getenv("ADMIN_GROUPS")),
+	}
+	switch a.Type {
+	case AuthOIDC, AuthGitLab, AuthLDAP, AuthNone:
+	case "":
+		fail("AUTH_TYPE is required: oidc, gitlab, ldap, or none (local development only)")
+		return a
+	default:
+		fail("AUTH_TYPE: unknown value %q (want oidc, gitlab, ldap or none)", a.Type)
+		return a
+	}
+	if a.Type == AuthNone {
+		return a
+	}
+
+	if raw := require("SESSION_KEY"); raw != "" {
+		key, err := decodeKey(raw)
+		if err != nil || len(key) != 32 {
+			fail("SESSION_KEY must be 32 random bytes, base64 encoded (e.g. openssl rand -base64 32)")
+		}
+		a.SessionKey = key
+	}
+	a.CookieSecure = !strings.HasPrefix(a.PublicURL, "http://")
+	if raw := str("COOKIE_SECURE", ""); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			fail("COOKIE_SECURE: invalid value %q", raw)
+		}
+		a.CookieSecure = v
+	}
+
+	switch a.Type {
+	case AuthOIDC, AuthGitLab:
+		if u, err := url.Parse(require("PUBLIC_URL")); a.PublicURL != "" && (err != nil || u.Scheme == "" || u.Host == "") {
+			fail("PUBLIC_URL must be an absolute URL such as https://runwarden.example.com")
+		}
+		scopes := []string{"openid", "profile", "email"}
+		for _, s := range strings.Fields(str("OIDC_SCOPES", "")) {
+			if !slices.Contains(scopes, s) {
+				scopes = append(scopes, s)
+			}
+		}
+		if a.Type == AuthOIDC {
+			a.OIDC = OIDC{
+				IssuerURL:     require("OIDC_ISSUER_URL"),
+				ClientID:      require("OIDC_CLIENT_ID"),
+				ClientSecret:  require("OIDC_CLIENT_SECRET"),
+				Scopes:        scopes,
+				UsernameClaim: str("OIDC_USERNAME_CLAIM", "preferred_username"),
+				GroupsClaims:  []string{str("OIDC_GROUPS_CLAIM", "groups")},
+			}
+		} else {
+			a.OIDC = OIDC{
+				IssuerURL:     strings.TrimRight(str("GITLAB_URL", "https://gitlab.com"), "/"),
+				ClientID:      require("GITLAB_CLIENT_ID"),
+				ClientSecret:  require("GITLAB_CLIENT_SECRET"),
+				Scopes:        scopes,
+				UsernameClaim: "nickname",
+				GroupsClaims:  []string{"groups", "groups_direct"},
+			}
+		}
+	case AuthLDAP:
+		a.LDAP = LDAP{
+			URL:            require("LDAP_URL"),
+			BindDN:         str("LDAP_BIND_DN", ""),
+			BindPassword:   getenv("LDAP_BIND_PASSWORD"),
+			UserBaseDN:     require("LDAP_USER_BASE_DN"),
+			UserFilter:     str("LDAP_USER_FILTER", "(uid={username})"),
+			GroupBaseDN:    str("LDAP_GROUP_BASE_DN", ""),
+			GroupFilter:    str("LDAP_GROUP_FILTER", "(member={dn})"),
+			GroupNameAttr:  str("LDAP_GROUP_NAME_ATTR", "cn"),
+			UserGroupsAttr: str("LDAP_USER_GROUPS_ATTR", ""),
+		}
+		if raw := str("LDAP_START_TLS", ""); raw != "" {
+			v, err := strconv.ParseBool(raw)
+			if err != nil {
+				fail("LDAP_START_TLS: invalid value %q", raw)
+			}
+			a.LDAP.StartTLS = v
+		}
+		if !strings.HasPrefix(a.LDAP.URL, "ldap://") && !strings.HasPrefix(a.LDAP.URL, "ldaps://") && a.LDAP.URL != "" {
+			fail("LDAP_URL must start with ldap:// or ldaps://")
+		}
+		if !strings.Contains(a.LDAP.UserFilter, "{username}") {
+			fail("LDAP_USER_FILTER must contain {username}")
 		}
 	}
-	return app, errors.Join(errs...)
+	return a
+}
+
+func decodeKey(s string) ([]byte, error) {
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if b, err := enc.DecodeString(s); err == nil {
+			return b, nil
+		}
+	}
+	return nil, errors.New("not base64")
+}
+
+// list splits a comma-separated value, dropping blanks.
+func list(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // parseBytes accepts a byte count with an optional binary suffix: 512, 64Ki, 10Mi, 1Gi.

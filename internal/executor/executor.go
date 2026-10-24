@@ -46,6 +46,7 @@ type Request struct {
 	Script  *config.Script
 	Values  map[string]params.Value // validated values, see config.Script.Values
 	Timeout time.Duration           // zero means Limits.Timeout
+	User    string                  // signed-in user, exported to the script as RUNWARDEN_USER
 }
 
 // ErrBusy is returned when the concurrent run limit is reached.
@@ -104,7 +105,11 @@ func (e *Executor) start(req Request) (*Run, error) {
 	id := e.nextID()
 	s := req.Script
 	inv := params.Build(s.Parameters, req.Values, id)
-	env, refused := e.env.build(inv.Env)
+	var fixed map[string]string
+	if req.User != "" {
+		fixed = map[string]string{"RUNWARDEN_USER": req.User}
+	}
+	env, refused := e.env.build(inv.Env, fixed)
 	for _, name := range refused {
 		logger().Warn("env variable refused for parameter", "script", s.Name, "variable", name)
 	}
