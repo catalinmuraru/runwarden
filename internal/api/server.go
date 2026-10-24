@@ -106,6 +106,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	h("GET /api/scripts", s.listScripts)
 	h("GET /api/scripts/{name}", s.getScript)
 	h("GET /api/scripts/{name}/parameters/{param}/values", s.parameterValues)
+	h("GET /api/scripts/{name}/parameters/{param}/files", s.parameterFiles)
 	h("POST /api/scripts/{name}/runs", s.startRun)
 	h("GET /api/runs", s.listRuns)
 	h("GET /api/runs/{id}", s.getRun)

@@ -4,8 +4,8 @@ A guarded place to run scripts. Runwarden is a self-hosted web UI for running a 
 scripts with typed parameters, live output, execution history and access control. It ships as a
 single binary and container image and is meant to run on Kubernetes.
 
-> **Status:** early development. The repository currently contains the project skeleton; features
-> below are being built incrementally.
+> **Status:** early development. The server and web UI work; container image and Helm chart are
+> next.
 
 ## Features
 
@@ -17,6 +17,21 @@ single binary and container image and is meant to run on Kubernetes.
 - **History**: execution logs and metadata kept on disk.
 - **Authentication** via OIDC, GitLab or LDAP; per-script allowed users, groups and admins.
 - **Audit log** of who ran what with which parameters.
+
+## Web UI
+
+- **Scripts**: the scripts you may run, grouped and filterable.
+- **Script page**: description and a form generated from the parameters (lists that depend on
+  other fields reload as you type, server files are browsed, uploads attach files); server-side
+  validation errors appear next to the fields.
+- **Run page**: live terminal with colours, an input line for scripts that ask questions, Stop and
+  Kill, the masked arguments and values, downloadable output files, and "Run again" with the same
+  values. Reloading or losing the connection resumes the output where it stopped.
+- **History**: runs you may see (your own; all runs of scripts you administer), filterable by
+  script.
+
+The UI is a Vue 3 single-page app embedded in the binary and served with a strict
+Content-Security-Policy.
 
 ## Script configuration
 
@@ -260,7 +275,7 @@ cd web && npm ci && npm run build && cd ..
 # Run the server on :8080 with the example scripts, without sign-in (local only)
 AUTH_TYPE=none RUNNERS_DIR=examples/runners go run ./cmd/runwarden
 
-# UI with hot reload, proxying /api to the server above
+# UI with hot reload on :5173, proxying /api and /auth to the server above
 cd web && npm run dev
 ```
 
@@ -270,7 +285,7 @@ Checks run in CI on every pull request:
 go test -race ./...
 golangci-lint run
 govulncheck ./...
-cd web && npm ci && npm run build
+cd web && npm ci && npm test && npm run build
 ```
 
 Without a UI build the binary still compiles; `/` then answers 503 with a hint.

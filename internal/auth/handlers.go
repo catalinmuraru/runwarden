@@ -52,6 +52,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.Handle("POST /auth/logout", h.sameOrigin(http.HandlerFunc(h.logout)))
 	mux.Handle("GET /api/me", h.Middleware(http.HandlerFunc(h.me)))
+	mux.HandleFunc("GET /auth/config", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"type": h.opts.Type})
+	})
 }
 
 // Middleware requires a signed-in user and attaches it to the request context. It also rejects

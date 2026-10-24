@@ -1,0 +1,13 @@
+{
+  "name": "Pick",
+  "script_path": "testdata/scripts/echo.sh",
+  "working_directory": ".",
+  "allowed_users": ["@ops"],
+  "parameters": [
+    { "name": "Flat", "type": "server_file", "file_dir": "replaced-in-tests",
+      "file_extensions": ["log"], "excluded_files": ["secret*"] },
+    { "name": "Tree", "type": "server_file", "file_dir": "replaced-in-tests",
+      "file_recursive": true, "excluded_files": ["**/tmp"] },
+    { "name": "Folder", "type": "server_file", "file_dir": "replaced-in-tests", "file_type": "dir" }
+  ]
+}
