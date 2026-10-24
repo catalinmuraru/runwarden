@@ -48,7 +48,7 @@ export interface RunMeta {
   id: string
   script: string
   user: string
-  args: string[]
+  args: string[] | null // null in records written before args were always a list
   values?: Record<string, unknown>
   status: string
   exit_code?: number

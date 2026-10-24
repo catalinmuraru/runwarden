@@ -120,7 +120,7 @@ onBeforeUnmount(() => {
       <dt>Duration</dt>
       <dd>{{ formatDuration(meta.started, meta.finished, now) }}</dd>
       <dt>Arguments</dt>
-      <dd><code>{{ meta.args.length ? meta.args.join(' ') : '(none)' }}</code></dd>
+      <dd><code>{{ meta.args?.length ? meta.args.join(' ') : '(none)' }}</code></dd>
       <template v-for="(v, k) in meta.values ?? {}" :key="k">
         <dt>{{ k }}</dt>
         <dd>{{ Array.isArray(v) ? v.join(', ') : String(v) }}</dd>

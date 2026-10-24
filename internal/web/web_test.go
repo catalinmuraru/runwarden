@@ -32,7 +32,7 @@ func TestSinglePageApp(t *testing.T) {
 		".gitkeep":           {Data: nil},
 	})
 
-	for _, page := range []string{"/", "/scripts/Backup%20Database", "/runs/20261024-1", "/login"} {
+	for _, page := range []string{"/", "/scripts/Backup%20Database", "/runs/20261024-165321.883-0004", "/scripts/v1.2%20deploy", "/login"} {
 		r := get(t, h, page)
 		if r.code != http.StatusOK || !strings.Contains(r.body, "app") {
 			t.Errorf("%s: %d %q", page, r.code, r.body)

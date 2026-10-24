@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,27 @@ func TestTrackAndReopen(t *testing.T) {
 	}
 	if list, _ := s.List(Filter{Script: "Other"}); len(list) != 0 {
 		t.Errorf("filtered list = %+v", list)
+	}
+}
+
+func TestArgsNeverNull(t *testing.T) {
+	data, work := t.TempDir(), t.TempDir()
+	s, _ := Open(data)
+	script, _ := filepath.Abs("testdata/produce.sh")
+	run, err := executor.New(executor.Limits{}, executor.EnvPolicy{}).Start(executor.Request{
+		Script: &config.Script{Name: "NoArgs", Command: []string{script}, WorkingDirectory: work},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	if err := s.Track(run, Meta{Script: "NoArgs"}, OutputFiles{}, func() { close(done) }); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	raw, _ := os.ReadFile(filepath.Join(data, "history", run.ID, "meta.json")) //nolint:gosec // test temp dir
+	if !strings.Contains(string(raw), `"args": []`) {
+		t.Errorf("meta.json = %s", raw)
 	}
 }
 
