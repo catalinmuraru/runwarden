@@ -1,0 +1,2 @@
+{ "name": "Report", "script_path": "testdata/scripts/report.sh", "working_directory": ".",
+  "output_files": ["report.txt", "missing-*.csv"] }

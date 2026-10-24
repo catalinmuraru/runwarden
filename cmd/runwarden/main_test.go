@@ -4,25 +4,36 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/catalinmuraru/runwarden/internal/api"
+	"github.com/catalinmuraru/runwarden/internal/config"
 )
 
-func TestProbes(t *testing.T) {
-	mux := newMux()
-	for _, path := range []string{"/healthz", "/readyz"} {
-		t.Run(path, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("GET %s = %d, want %d", path, rec.Code, http.StatusOK)
-			}
-		})
-	}
+func get(t *testing.T, h http.Handler, method, path string) int {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), method, path, nil))
+	return rec.Code
 }
 
-func TestProbesRejectPost(t *testing.T) {
-	rec := httptest.NewRecorder()
-	newMux().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/healthz", nil))
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("POST /healthz = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+func TestProbes(t *testing.T) {
+	apiSrv := api.New(api.Options{}, nil, nil)
+	mux := newMux(apiSrv)
+
+	if code := get(t, mux, http.MethodGet, "/healthz"); code != http.StatusOK {
+		t.Errorf("GET /healthz = %d, want 200", code)
+	}
+	if code := get(t, mux, http.MethodGet, "/readyz"); code != http.StatusServiceUnavailable {
+		t.Errorf("GET /readyz before configs load = %d, want 503", code)
+	}
+	apiSrv.SetCatalog(&config.Catalog{})
+	if code := get(t, mux, http.MethodGet, "/readyz"); code != http.StatusOK {
+		t.Errorf("GET /readyz after configs load = %d, want 200", code)
+	}
+	if code := get(t, mux, http.MethodPost, "/healthz"); code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /healthz = %d, want 405", code)
+	}
+	if code := get(t, mux, http.MethodGet, "/api/nope"); code != http.StatusNotFound {
+		t.Errorf("GET /api/nope = %d, want 404", code)
 	}
 }
