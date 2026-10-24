@@ -135,7 +135,7 @@ func (p *Parameter) validateServerFile(v Value) error {
 		segments = []string{v.Str}
 	}
 	for _, s := range segments {
-		if s == "" || s == "." || s == ".." || strings.ContainsAny(s, "/\\\x00") {
+		if !ValidSegment(s) {
 			return p.invalid("contains an invalid path segment")
 		}
 	}
@@ -151,17 +151,30 @@ func (p *Parameter) validateServerFile(v Value) error {
 		}
 	}
 
-	// Check every prefix too: an excluded directory excludes everything below it.
+	if p.Excluded(segments) {
+		return p.invalid("is excluded")
+	}
+	return nil
+}
+
+// ValidSegment reports whether s can be one path segment below a server_file directory.
+func ValidSegment(s string) bool {
+	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\\\x00")
+}
+
+// Excluded reports whether the path made of segments, or any directory above it, matches an
+// excluded_files pattern.
+func (p *Parameter) Excluded(segments []string) bool {
 	for i := range segments {
 		relPrefix := path.Join(segments[:i+1]...)
 		fullPrefix := filepath.ToSlash(filepath.Join(p.FileDir, filepath.FromSlash(relPrefix)))
 		for _, pattern := range p.ExcludedFiles {
 			if excluded(pattern, segments[i], relPrefix, fullPrefix) {
-				return p.invalid("is excluded")
+				return true
 			}
 		}
 	}
-	return nil
+	return false
 }
 
 // excluded matches an exclusion glob. Patterns without a slash match a single path segment;

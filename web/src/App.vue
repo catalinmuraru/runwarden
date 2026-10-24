@@ -1,5 +1,11 @@
+<script setup lang="ts">
+import AppHeader from './components/AppHeader.vue'
+import { session } from './session'
+</script>
+
 <template>
-  <main>
-    <h1>Runwarden</h1>
+  <AppHeader v-if="session.me" />
+  <main class="container">
+    <RouterView />
   </main>
 </template>

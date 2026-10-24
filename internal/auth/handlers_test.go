@@ -264,6 +264,14 @@ func TestMiddlewareAndOrigin(t *testing.T) {
 	}
 }
 
+func TestAuthConfigIsPublic(t *testing.T) {
+	e := newAuthEnv(t, Options{Type: "ldap", Password: fakePassword{}})
+	resp := e.do(http.MethodGet, "/auth/config", "", nil)
+	if resp.StatusCode != http.StatusOK || strings.TrimSpace(string(resp.Body)) != `{"type":"ldap"}` {
+		t.Errorf("config = %d %s", resp.StatusCode, resp.Body)
+	}
+}
+
 func TestAuthNone(t *testing.T) {
 	e := newAuthEnv(t, Options{Type: "none"})
 	resp := e.do(http.MethodGet, "/api/me", "", nil)

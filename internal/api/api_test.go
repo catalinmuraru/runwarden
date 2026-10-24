@@ -31,6 +31,7 @@ const testWait = 20 * time.Second
 
 type testEnv struct {
 	t      *testing.T
+	srv    *Server
 	ts     *httptest.Server
 	ex     *executor.Executor
 	hist   *history.Store
@@ -107,7 +108,16 @@ func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 		_ = ex.Shutdown(ctx)
 		hist.Wait()
 	})
-	return &testEnv{t: t, ts: ts, ex: ex, hist: hist, data: data, user: "alice", groups: "ops"}
+	return &testEnv{t: t, srv: srv, ts: ts, ex: ex, hist: hist, data: data, user: "alice", groups: "ops"}
+}
+
+func (e *testEnv) script(name string) *config.Script {
+	e.t.Helper()
+	sc := e.srv.script(name)
+	if sc == nil {
+		e.t.Fatalf("script %q not loaded", name)
+	}
+	return sc
 }
 
 // do sends a request; a non-nil body that is not an io.Reader is sent as JSON.
