@@ -3,7 +3,7 @@
 image:
   repository: ghcr.io/catalinmuraru/runwarden
   # Defaults to the chart's appVersion.
-  tag: ""
+  tag: "@sha256:7952e825ac81f38dc427ba8d9ae38a4c20225f4d5895abdd9fbe3dd9570a097b"
   # sha256:... — when set, the image is pulled by digest and tag is ignored.
   digest: ""
   pullPolicy: IfNotPresent
