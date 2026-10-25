@@ -23,6 +23,22 @@
     },
     "existingSecret": { "type": "string" },
     "allowedOrigins": { "type": "array", "items": { "type": "string" } },
+    "trustedProxies": { "type": "array", "items": { "type": "string" } },
+    "history": {
+      "type": "object",
+      "properties": {
+        "maxAge": { "type": ["string", "integer"] },
+        "maxRuns": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "size": { "type": "string" },
+        "keepOnUninstall": { "type": "boolean" }
+      }
+    },
     "runners": {
       "type": "object",
       "properties": { "configs": { "type": "object", "additionalProperties": { "type": "object" } } }

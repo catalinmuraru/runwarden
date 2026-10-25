@@ -3,13 +3,15 @@
 package api
 
 import (
-	"log/slog"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
 
+	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/auth"
 	"github.com/catalinmuraru/runwarden/internal/authz"
+	"github.com/catalinmuraru/runwarden/internal/clientip"
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
@@ -21,6 +23,7 @@ type Options struct {
 	DataDir        string   // uploads go to DataDir/uploads
 	MaxUploadBytes int64    // per request
 	AllowedOrigins []string // extra hosts allowed to open WebSockets (same host always is)
+	ClientIP       clientip.Resolver
 	// Authenticate attaches the signed-in user (auth.WithUser) or rejects the request.
 	// Without it every API request is rejected.
 	Authenticate func(http.Handler) http.Handler
@@ -122,8 +125,22 @@ func (s *Server) Register(mux *http.ServeMux) {
 	}))
 }
 
-// audit writes one structured line per user action.
-func audit(r *http.Request, action string, attrs ...any) {
-	attrs = append([]any{"audit", true, "action", action, "user", currentUser(r).Name}, attrs...)
-	slog.Info("audit", attrs...)
+// record writes an audit event for the requesting user.
+func (s *Server) record(r *http.Request, e audit.Event) {
+	u := currentUser(r)
+	e.User, e.Groups = u.Name, u.Groups
+	e.SourceIP = s.opts.ClientIP.IP(r)
+	e.UserAgent = r.UserAgent()
+	audit.Log(r.Context(), e)
+}
+
+// recordRunAction audits input, stop and kill on a run.
+func (s *Server) recordRunAction(r *http.Request, action string, run *executor.Run, err error) {
+	verb := map[string]string{audit.RunInput: "input sent to", audit.RunStop: "stop requested for", audit.RunKill: "kill requested for"}[action]
+	e := audit.Event{Action: action, Category: "process", Type: "change", Success: err == nil,
+		RunID: run.ID, Script: run.ScriptName, Message: fmt.Sprintf("%s run %s", verb, run.ID)}
+	if err != nil {
+		e.Reason = err.Error()
+	}
+	s.record(r, e)
 }

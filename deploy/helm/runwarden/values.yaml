@@ -55,6 +55,27 @@ limits:
 # Extra hosts allowed to open WebSockets (the server's own host always is).
 allowedOrigins: []
 
+# Networks of your ingress controller / load balancer (CIDRs). Requests from them may carry
+# X-Forwarded-For, so audit logs and the sign-in rate limit see the real client address.
+trustedProxies: []
+
+# Run history retention: age ("90d", "720h", "0" = forever) and maximum number of runs (0 = no
+# limit). Running runs are never removed.
+history:
+  maxAge: 90d
+  maxRuns: 0
+
+# Persistent working space for scripts that keep files between runs (git clones, dumps).
+# Mounted at /var/lib/runwarden-work; scripts see the path as $RUNWARDEN_WORKSPACE.
+workspace:
+  enabled: false
+  size: 10Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  existingClaim: ""
+  keepOnUninstall: true
+
 runners:
   # Runner configs as file name → config object. Empty: use the configs baked into the image
   # (/etc/runwarden/runners). When set, they replace the image's configs.

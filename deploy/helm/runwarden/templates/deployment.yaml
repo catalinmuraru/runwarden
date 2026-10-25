@@ -87,6 +87,10 @@ spec:
               mountPath: /tmp
             - name: home
               mountPath: /home/runwarden
+            {{- if .Values.workspace.enabled }}
+            - name: workspace
+              mountPath: /var/lib/runwarden-work
+            {{- end }}
             {{- if .Values.runners.configs }}
             - name: runners
               mountPath: /etc/runwarden/runners
@@ -107,6 +111,11 @@ spec:
           emptyDir: {}
         - name: home
           emptyDir: {}
+        {{- if .Values.workspace.enabled }}
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspace.existingClaim | default (printf "%s-workspace" (include "runwarden.fullname" .)) }}
+        {{- end }}
         {{- if .Values.runners.configs }}
         - name: runners
           configMap:

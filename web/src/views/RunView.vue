@@ -49,11 +49,15 @@ function follow() {
 
 async function sendInput() {
   const line = input.value
+  const secret = hideInput.value
   input.value = ''
   actionError.value = ''
-  terminal.value?.write(hideInput.value ? '\x1b[2m(hidden input sent)\x1b[0m\n' : `\x1b[2m${line}\x1b[0m\n`)
-  if (!stream?.send({ type: 'input', line })) {
-    await api.input(props.id, line).catch((e: Error) => (actionError.value = e.message))
+  // On a terminal the script's terminal echoes input itself (hidden input comes back masked).
+  if (!meta.value?.terminal) {
+    terminal.value?.write(secret ? '\x1b[2m(hidden input sent)\x1b[0m\n' : `\x1b[2m${line}\x1b[0m\n`)
+  }
+  if (!stream?.send({ type: 'input', line, secret })) {
+    await api.input(props.id, line, secret).catch((e: Error) => (actionError.value = e.message))
   }
 }
 

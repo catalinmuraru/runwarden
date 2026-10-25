@@ -25,6 +25,9 @@ type App struct {
 	MaxOutputBytes    int64         // MAX_OUTPUT_BYTES, default 10Mi
 	MaxUploadBytes    int64         // MAX_UPLOAD_BYTES, default 100Mi
 	AllowedOrigins    []string      // ALLOWED_ORIGINS, comma-separated hosts allowed for WebSockets
+	TrustedProxies    []string      // TRUSTED_PROXIES, CIDRs whose X-Forwarded-For is believed
+	HistoryMaxAge     time.Duration // HISTORY_MAX_AGE, default 90d; 0 keeps runs forever
+	HistoryMaxRuns    int           // HISTORY_MAX_RUNS, default 0 (no limit)
 	Auth              Auth
 }
 
@@ -126,6 +129,22 @@ func LoadApp(getenv func(string) string) (App, error) {
 		MaxUploadBytes:    num("MAX_UPLOAD_BYTES", 100<<20, parseBytes),
 	}
 	app.AllowedOrigins = list(getenv("ALLOWED_ORIGINS"))
+	app.TrustedProxies = list(getenv("TRUSTED_PROXIES"))
+	app.HistoryMaxAge = 90 * 24 * time.Hour
+	if raw := str("HISTORY_MAX_AGE", ""); raw != "" {
+		d, err := parseDays(raw)
+		if err != nil || d < 0 {
+			errs = append(errs, fmt.Errorf("HISTORY_MAX_AGE: invalid value %q (e.g. 90d, 720h, 0 to keep forever)", raw))
+		}
+		app.HistoryMaxAge = d
+	}
+	if raw := str("HISTORY_MAX_RUNS", ""); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			errs = append(errs, fmt.Errorf("HISTORY_MAX_RUNS: invalid value %q", raw))
+		}
+		app.HistoryMaxRuns = n
+	}
 	app.Auth = loadAuth(getenv, str, dur, &errs)
 	return app, errors.Join(errs...)
 }
@@ -253,6 +272,18 @@ func list(s string) []string {
 		}
 	}
 	return out
+}
+
+// parseDays is time.ParseDuration plus a "d" (days) unit: 90d, 36h, 0.
+func parseDays(s string) (time.Duration, error) {
+	if rest, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(rest)
+		return time.Duration(n) * 24 * time.Hour, err
+	}
+	if s == "0" {
+		return 0, nil
+	}
+	return time.ParseDuration(s)
 }
 
 // parseBytes accepts a byte count with an optional binary suffix: 512, 64Ki, 10Mi, 1Gi.

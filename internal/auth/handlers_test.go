@@ -1,16 +1,20 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/catalinmuraru/runwarden/internal/clientip"
 )
 
 type fakeRedirect struct{ fail bool }
@@ -261,6 +265,37 @@ func TestMiddlewareAndOrigin(t *testing.T) {
 	body := resp.Body
 	if c := cookie(resp, sessionCookie); c == nil || c.MaxAge >= 0 || !strings.Contains(string(body), "idp.example/logout") {
 		t.Errorf("logout response: cookie %+v body %s", c, body)
+	}
+}
+
+func TestLoginAudit(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	proxies, _ := clientip.New([]string{"192.0.2.0/24"})
+	e := newAuthEnv(t, Options{Type: "ldap", Password: fakePassword{}, ClientIP: proxies})
+	login := func(user, pw string) {
+		body, _ := json.Marshal(credentials{Username: user, Password: pw}) //nolint:gosec // test credentials
+		e.do(http.MethodPost, "/auth/login", string(body), nil, "RemoteAddr", "192.0.2.10:4000", "X-Forwarded-For", "198.51.100.23")
+	}
+	login("alice", "wrong-pass")
+	login("alice", "secret")
+
+	logs := buf.String()
+	for _, want := range []string{
+		`"action":"login","outcome":"failure","dataset":"runwarden.audit","reason":"invalid user name or password"`,
+		`"action":"login","outcome":"success"`,
+		`"user":{"name":"alice"}`,
+		`"source":{"ip":"198.51.100.23"}`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("audit log missing %s:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "wrong-pass") || strings.Contains(logs, `"secret"`) {
+		t.Error("password in the logs")
 	}
 }
 

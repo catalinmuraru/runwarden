@@ -97,16 +97,25 @@ go run ./cmd/runwarden check-config path/to/runners
   gets its own process group; stop sends `SIGTERM` to the whole group and `SIGKILL` after a
   grace period. A run ends when its main process exits; leftover background children are
   terminated.
-- stdout and stderr are combined in order. Output is stored per run (readers can follow it live)
-  and every `secure` value is replaced by `******` before it is stored.
-- stdin stays open for interactive answers; `pass_as: stdin` values are written at start or,
-  with `stdin_expected_text`, once that text appears in the output. Scripts run without a
-  terminal, so prompts printed by `read -p` are not shown; print prompts with `printf` instead.
+- **Terminal**: scripts with `requires_terminal: true` (the default) run on a pseudo-terminal
+  (120×40, `TERM=xterm-256color`), so `read -p` prompts, colours and tools that need a TTY work.
+  With `requires_terminal: false` they get pipes: stdout and stderr combined in order.
+- Output is stored per run (readers can follow it live). Every `secure` value is replaced by
+  `******` before it is stored, and so is every match of the script's `redact_patterns` (RE2
+  regexes, applied per line) — use them for secrets a script prints itself, e.g.
+  `"redact_patterns": ["ghp_[A-Za-z0-9]+", "(?i)password: \\S+"]`.
+- stdin stays open for interactive answers. Input sent as hidden (the UI's "hide" box, or
+  `"secret": true` in the API) is masked wherever it appears in the output, including the
+  terminal's echo. `pass_as: stdin` values are written at start or, with `stdin_expected_text`,
+  once that text appears in the output.
+- Each run gets a private, empty `TMPDIR`, removed when the run ends, so concurrent runs don't
+  collide on temporary files (use `mktemp` / `$TMPDIR` instead of fixed names in `/tmp`).
 - Environment: scripts never inherit Runwarden's environment. They get `PATH`, `HOME`, `LANG`,
   `TZ` (defaults `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
-  `LANG=C.UTF-8`), every `RUNNER_ENV_<NAME>` variable as `<NAME>`, `EXECUTION_ID`, and their
-  parameter variables. Parameters cannot set `PATH`, `HOME`, `IFS`, `ENV`, `BASH_ENV`,
-  `LD_*` and similar variables.
+  `LANG=C.UTF-8`), every `RUNNER_ENV_<NAME>` variable as `<NAME>`, `EXECUTION_ID`,
+  `RUNWARDEN_USER` (who started the run), `TMPDIR`, `TERM` on a terminal, and their parameter
+  variables. Parameters cannot set `PATH`, `HOME`, `IFS`, `ENV`, `BASH_ENV`, `LD_*`,
+  `RUNWARDEN_USER`, `TMPDIR`, `TERM` and similar variables.
 
 | Limit | Default |
 |---|---|
@@ -132,9 +141,73 @@ All settings come from environment variables. Secrets are never read from files.
 | `MAX_UPLOAD_BYTES` | `100Mi` | maximum upload request size |
 | `ALLOWED_ORIGINS` | – | extra hosts allowed to open WebSockets, comma-separated (`ops.example.com,*.example.org`); the server's own host is always allowed |
 | `RUNNER_ENV_<NAME>` | – | passed to scripts as `<NAME>` |
+| `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
+| `HISTORY_MAX_AGE` | `90d` | remove finished runs older than this (`d` or Go durations; `0` keeps them) |
+| `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |
 
 Send `SIGHUP` to reload runner configs without a restart. `GET /healthz` is liveness;
 `GET /readyz` reports ready once runner configs are loaded.
+
+## Logs and audit trail
+
+Runwarden writes one JSON object per line to stdout in
+[Elastic Common Schema](https://www.elastic.co/guide/en/ecs/current/index.html) (ECS 8.11):
+`@timestamp`, `log.level`, `message`, `ecs.version`, `service.name`/`service.version`, and
+`event.dataset` — `runwarden.audit` for the audit trail, `runwarden.app` for everything else.
+Custom fields live under `runwarden.*`.
+
+Audit events answer who did what and with which result:
+
+| `event.action` | When | `event.outcome` |
+|---|---|---|
+| `run-start` | a run was started — or refused (`event.reason`: not allowed, unknown script, invalid parameters, too many runs) | success / failure |
+| `run-end` | a run ended: status, exit code, duration, who started it | success if it finished with exit code 0 |
+| `run-input`, `run-stop`, `run-kill` | a user sent input to, stopped or killed a run | success / failure |
+| `login`, `logout` | sign-in (with the failure reason) and sign-out | success / failure |
+| `config-reload` | runner configs reloaded (`SIGHUP`) | success / failure |
+| `history-cleanup` | old runs removed by the retention settings | success |
+
+Fields: `user.name`, `user.roles` (groups), `source.ip`, `user_agent.original`,
+`event.category`/`event.type`/`event.duration` (ns), `process.exit_code`, `process.args`
+(masked), `runwarden.run.id`, `runwarden.run.status`, `runwarden.run.parameters` (masked values
+as one JSON string, so arbitrary parameter names can't explode the index mapping) and
+`runwarden.script.name`. Secure values, hidden input and passwords never appear.
+
+```json
+{"@timestamp":"2026-10-25T04:03:11.765Z","log.level":"info","message":"run 20261025-040310.753-0001 of \"Restart Service\" by alice: finished (exit code 0)","ecs.version":"8.11.0","service":{"name":"runwarden","version":"0.2.0"},"event":{"kind":"event","category":["process"],"type":["end"],"action":"run-end","outcome":"success","dataset":"runwarden.audit","duration":1010455273},"user":{"name":"alice","roles":["ops"]},"source":{"ip":"198.51.100.23"},"process":{"exit_code":0,"args":["--service","api","--timeout","30"]},"runwarden":{"run":{"id":"20261025-040310.753-0001","status":"finished","parameters":"{\"Service\":\"api\",\"Timeout seconds\":\"30\"}"},"script":{"name":"Restart Service"}}}
+```
+
+### Filebeat
+
+The lines are ready for Filebeat's `ndjson` parser; no ingest pipeline is needed. On
+Kubernetes, with autodiscover:
+
+```yaml
+filebeat.autodiscover:
+  providers:
+    - type: kubernetes
+      node: ${NODE_NAME}
+      templates:
+        - condition:
+            equals:
+              kubernetes.labels.app.kubernetes.io/name: runwarden
+          config:
+            - type: filestream
+              id: runwarden-${data.kubernetes.container.id}
+              paths:
+                - /var/log/containers/*-${data.kubernetes.container.id}.log
+              prospector.scanner.symlinks: true
+              parsers:
+                - container: ~
+                - ndjson:
+                    target: ""
+                    overwrite_keys: true
+                    expand_keys: true
+                    add_error_key: true
+```
+
+Outside Kubernetes, point a `filestream` input with the same `ndjson` parser at the file stdout
+is written to. Search the audit trail in Kibana with `event.dataset : "runwarden.audit"`.
 
 ## Authentication and authorization
 
@@ -299,6 +372,11 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
   ConfigMap; changing them restarts the pod).
 - **Ingress**: the controller must allow WebSocket upgrades and long read timeouts (runs may last
   as long as `limits.runTimeout`); add the annotations your controller needs.
+- **Audit**: set `trustedProxies` to your ingress/load-balancer networks so audit events record
+  the real client address; ship the pod log with Filebeat (see *Logs and audit trail*).
+- **Retention**: `history.maxAge` (default `90d`) and `history.maxRuns`.
+- **Workspace**: `workspace.enabled` adds a persistent volume at `/var/lib/runwarden-work`
+  (`$RUNWARDEN_WORKSPACE` in scripts) for flows that keep files between runs.
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
   (e.g. an SSH key from a Secret).
 

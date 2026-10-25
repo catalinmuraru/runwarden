@@ -9,15 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/api"
+	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/auth"
 	"github.com/catalinmuraru/runwarden/internal/authz"
+	"github.com/catalinmuraru/runwarden/internal/clientip"
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
+	"github.com/catalinmuraru/runwarden/internal/logging"
 	"github.com/catalinmuraru/runwarden/internal/web"
 )
 
@@ -35,7 +39,7 @@ func main() {
 		}
 	}
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("version", version))
+	slog.SetDefault(slog.New(logging.NewECSHandler(os.Stdout, version, slog.LevelInfo)))
 	if err := run(); err != nil {
 		slog.Error("runwarden stopped", "err", err)
 		os.Exit(1)
@@ -55,12 +59,22 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("history: %w", err)
 	}
+	clientIP, err := clientip.New(cfg.TrustedProxies)
+	if err != nil {
+		return fmt.Errorf("configuration: %w", err)
+	}
+	// Per-run temp dirs live here; leftovers from a previous process are removed.
+	tempRoot := filepath.Join(cfg.DataDir, "tmp")
+	_ = os.RemoveAll(tempRoot)
+	if err := os.MkdirAll(tempRoot, 0o700); err != nil {
+		return fmt.Errorf("temp dir: %w", err)
+	}
 	ex := executor.New(executor.Limits{
 		MaxConcurrent:  cfg.MaxConcurrentRuns,
 		Timeout:        cfg.RunTimeout,
 		KillGrace:      cfg.KillGrace,
 		MaxOutputBytes: cfg.MaxOutputBytes,
-	}, executor.EnvPolicy{})
+	}, executor.EnvPolicy{TempRoot: tempRoot})
 	policy := authz.Policy{
 		AdminUsers:  cfg.Auth.AdminUsers,
 		AdminGroups: cfg.Auth.AdminGroups,
@@ -70,7 +84,7 @@ func run() error {
 	defer stop()
 
 	var apiSrv *api.Server
-	authH, err := newAuth(ctx, cfg, policy, func() []string { return apiSrv.ReferencedGroups() })
+	authH, err := newAuth(ctx, cfg, policy, clientIP, func() []string { return apiSrv.ReferencedGroups() })
 	if err != nil {
 		return err
 	}
@@ -79,11 +93,13 @@ func run() error {
 		DataDir:        cfg.DataDir,
 		MaxUploadBytes: cfg.MaxUploadBytes,
 		AllowedOrigins: cfg.AllowedOrigins,
+		ClientIP:       clientIP,
 		Authenticate:   authH.Middleware,
 		Policy:         policy,
 	}, ex, hist)
 	apiSrv.SetCatalog(cat)
 	go reloadOnHangup(ctx, cfg, apiSrv)
+	go cleanHistory(ctx, cfg, hist)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -122,10 +138,11 @@ func run() error {
 }
 
 // newAuth builds the login handlers for the configured AUTH_TYPE.
-func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, relevantGroups func() []string) (*auth.Handler, error) {
+func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, clientIP clientip.Resolver, relevantGroups func() []string) (*auth.Handler, error) {
 	opts := auth.Options{
 		Type:           cfg.Auth.Type,
 		AllowedOrigins: cfg.AllowedOrigins,
+		ClientIP:       clientIP,
 		IsAdmin:        policy.IsAdmin,
 		RelevantGroups: relevantGroups,
 	}
@@ -180,11 +197,39 @@ func reloadOnHangup(ctx context.Context, cfg config.App, apiSrv *api.Server) {
 			return
 		case <-hup:
 			cat, err := loadCatalog(cfg)
+			e := audit.Event{Action: audit.ConfigReload, Category: "configuration", Type: "change", Success: err == nil}
 			if err != nil {
 				slog.Error("reload failed; keeping the current configs", "err", err)
-				continue
+				e.Reason, e.Message = err.Error(), "runner config reload failed"
+			} else {
+				apiSrv.SetCatalog(cat)
+				e.Count, e.Message = len(cat.Scripts), fmt.Sprintf("runner configs reloaded: %d scripts, %d errors", len(cat.Scripts), len(cat.Errors))
 			}
-			apiSrv.SetCatalog(cat)
+			audit.Log(ctx, e)
+		}
+	}
+}
+
+// cleanHistory applies the retention settings at startup and then every hour.
+func cleanHistory(ctx context.Context, cfg config.App, hist *history.Store) {
+	if cfg.HistoryMaxAge == 0 && cfg.HistoryMaxRuns == 0 {
+		return
+	}
+	tick := time.NewTicker(time.Hour)
+	defer tick.Stop()
+	for {
+		n, err := hist.Cleanup(cfg.HistoryMaxAge, cfg.HistoryMaxRuns, time.Now())
+		if err != nil {
+			slog.Error("history cleanup", "err", err)
+		}
+		if n > 0 {
+			audit.Log(ctx, audit.Event{Action: audit.HistoryCleanup, Category: "file", Type: "deletion", Success: true,
+				Count: n, Message: fmt.Sprintf("history cleanup removed %d runs", n)})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
 		}
 	}
 }

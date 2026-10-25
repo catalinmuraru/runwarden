@@ -100,7 +100,7 @@ export class RunStream {
   }
 
   /** Sends a command (input, close_input, stop, kill). Returns false when not connected. */
-  send(msg: { type: string; line?: string }): boolean {
+  send(msg: { type: string; line?: string; secret?: boolean }): boolean {
     if (!this.socket) return false
     this.socket.send(JSON.stringify(msg))
     return true

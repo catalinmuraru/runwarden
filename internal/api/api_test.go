@@ -186,10 +186,16 @@ func (e *testEnv) finish(id string) history.Meta {
 	return history.Meta{}
 }
 
-func (e *testEnv) output(id string) string {
+func (e *testEnv) rawOutput(id string) string {
 	e.t.Helper()
 	_, body := e.do(http.MethodGet, "/api/runs/"+id+"/output", nil)
 	return string(body)
+}
+
+func (e *testEnv) output(id string) string {
+	e.t.Helper()
+	_, body := e.do(http.MethodGet, "/api/runs/"+id+"/output", nil)
+	return strings.ReplaceAll(string(body), "\r\n", "\n") // terminals end lines with CRLF
 }
 
 func (e *testEnv) waitOutput(id, text string) {
@@ -514,7 +520,7 @@ func TestWebSocketStoredWithOffset(t *testing.T) {
 	e := setup(t, executor.Limits{}, Options{})
 	id := e.start("Echo", map[string]any{"Name": "abc"})
 	e.finish(id)
-	full := e.output(id)
+	full := e.rawOutput(id) // offsets count raw bytes, terminal CRLF included
 
 	c, _, err := e.dial(id, "?offset=5", nil)
 	if err != nil {

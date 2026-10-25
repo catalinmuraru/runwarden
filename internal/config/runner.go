@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 
 	"github.com/catalinmuraru/runwarden/internal/params"
@@ -19,6 +20,9 @@ type Script struct {
 	AllowedUsers     []string // user names, "@group" or "*"
 	AdminUsers       []string
 	OutputFiles      []string // globs offered for download after a run
+	// RedactPatterns are regexes whose matches are masked in the output, for secrets a script
+	// prints that are not parameters (e.g. generated passwords).
+	RedactPatterns   []*regexp.Regexp
 	RequiresTerminal bool
 	Scheduling       bool
 	Parameters       []*params.Parameter

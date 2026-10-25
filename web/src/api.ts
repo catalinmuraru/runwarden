@@ -56,6 +56,7 @@ export interface RunMeta {
   finished?: string
   output_truncated?: boolean
   files?: string[]
+  terminal?: boolean // ran on a pseudo-terminal (input is echoed by the terminal)
 }
 
 export interface FileEntry {
@@ -141,7 +142,7 @@ export const api = {
 
   runs: async (script?: string) => (await request<{ runs: RunMeta[] }>('GET', `/api/runs${query({ script })}`)).runs,
   run: (id: string) => request<RunMeta>('GET', `/api/runs/${enc(id)}`),
-  input: (id: string, line: string) => request<void>('POST', `/api/runs/${enc(id)}/input`, { line }),
+  input: (id: string, line: string, secret = false) => request<void>('POST', `/api/runs/${enc(id)}/input`, { line, secret }),
   closeInput: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/input`, { close: true }),
   stop: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/stop`),
   kill: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/kill`),

@@ -11,3 +11,7 @@ limits:
 persistence:
   size: 1Gi
   keepOnUninstall: false
+workspace:
+  enabled: true
+  size: 1Gi
+  keepOnUninstall: false

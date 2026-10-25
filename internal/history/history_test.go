@@ -130,6 +130,41 @@ func TestListOrderAndLimit(t *testing.T) {
 	}
 }
 
+func TestCleanup(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	add := func(id string, age time.Duration, status string) {
+		if err := os.Mkdir(filepath.Join(s.dir, id), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.writeMeta(Meta{ID: id, Status: status, Started: now.Add(-age)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("old-running", 400*24*time.Hour, "running")
+	add("old", 100*24*time.Hour, "finished")
+	add("mid1", 10*24*time.Hour, "failed")
+	add("mid2", 5*24*time.Hour, "finished")
+	add("new", time.Hour, "finished")
+
+	n, err := s.Cleanup(90*24*time.Hour, 0, now)
+	if err != nil || n != 1 {
+		t.Fatalf("age cleanup removed %d (%v), want 1", n, err)
+	}
+	n, err = s.Cleanup(0, 2, now) // keep the 2 newest; never running ones
+	if err != nil || n != 1 {
+		t.Fatalf("count cleanup removed %d (%v), want 1", n, err)
+	}
+	var left []string
+	list, _ := s.List(Filter{})
+	for _, m := range list {
+		left = append(left, m.ID)
+	}
+	if want := []string{"new", "mid2", "old-running"}; !slices.Equal(left, want) {
+		t.Errorf("left %q, want %q", left, want)
+	}
+}
+
 func TestInterruptedOnOpen(t *testing.T) {
 	data := t.TempDir()
 	s, _ := Open(data)
