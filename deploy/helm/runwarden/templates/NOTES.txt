@@ -1,0 +1,19 @@
+Runwarden {{ .Chart.AppVersion }} is installed as {{ include "runwarden.fullname" . }}.
+
+{{- if .Values.ingress.enabled }}
+Open https://{{ .Values.ingress.host }}
+{{- else }}
+Try it with:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "runwarden.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080
+{{- end }}
+
+{{- if eq .Values.auth.type "none" }}
+
+WARNING: auth.type=none — there is no sign-in and every visitor is an admin.
+Use this only for local testing.
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+
+Note: persistence is disabled; run history is lost when the pod restarts.
+{{- end }}

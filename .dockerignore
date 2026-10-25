@@ -1,0 +1,10 @@
+.git
+.github
+**/node_modules
+internal/web/dist
+data
+docs
+deploy
+*.test
+*.out
+/runwarden

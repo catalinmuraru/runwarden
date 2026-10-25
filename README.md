@@ -4,8 +4,8 @@ A guarded place to run scripts. Runwarden is a self-hosted web UI for running a 
 scripts with typed parameters, live output, execution history and access control. It ships as a
 single binary and container image and is meant to run on Kubernetes.
 
-> **Status:** early development. The server and web UI work; container image and Helm chart are
-> next.
+> **Status:** early development. Server, web UI, container image and Helm chart work; no release
+> has been tagged yet.
 
 ## Features
 
@@ -244,6 +244,76 @@ Every action (start, input, stop, kill) is also written to the log as a structur
 `"audit": true`, the user, the script, the run ID and the masked parameter values. History is
 stored under `DATA_DIR/history/<run-id>/` (`meta.json`, `output.log`, `files/`).
 
+## Deployment
+
+### Images
+
+`ghcr.io/catalinmuraru/runwarden` is the generic base image (`linux/amd64`, `linux/arm64`):
+Debian slim with `bash`, the Runwarden binary (UI included) and `tini` as PID 1. It runs as uid
+10001 and expects:
+
+| Path | Purpose |
+|---|---|
+| `/etc/runwarden/runners` | runner configs (`RUNNERS_DIR`) |
+| `/opt/runwarden` | scripts; relative paths in configs resolve here (`BASE_DIR`) |
+| `/var/lib/runwarden` | run history (`DATA_DIR`) — mount a volume |
+| `/home/runwarden`, `/tmp` | writable scratch space when the root filesystem is read-only |
+
+Put your scripts, the tools they need and the runner configs into an image built on top of it,
+so tool and script updates stay separate from Runwarden updates
+([examples/Dockerfile](examples/Dockerfile)):
+
+```dockerfile
+FROM ghcr.io/catalinmuraru/runwarden:0.1.0
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl jq && rm -rf /var/lib/apt/lists/*
+USER 10001:10001
+COPY runners/ /etc/runwarden/runners/
+COPY scripts/ /opt/runwarden/scripts/
+```
+
+### Helm chart
+
+```bash
+kubectl create secret generic runwarden-env \
+  --from-literal=SESSION_KEY="$(openssl rand -base64 32)" \
+  --from-literal=OIDC_CLIENT_SECRET=... \
+  --from-literal=RUNNER_ENV_API_TOKEN=...      # passed to scripts as API_TOKEN
+
+helm install runwarden oci://ghcr.io/catalinmuraru/charts/runwarden --version 0.1.0 \
+  --set image.repository=registry.example.com/my-scripts --set image.tag=1.0.0 \
+  --set auth.type=oidc --set auth.publicUrl=https://runwarden.example.com \
+  --set auth.oidc.issuerUrl=https://idp.example.com/realms/ops --set auth.oidc.clientId=runwarden \
+  --set existingSecret=runwarden-env \
+  --set ingress.enabled=true --set ingress.host=runwarden.example.com
+```
+
+See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highlights:
+
+- **One replica, `Recreate` strategy**: running scripts live in the Runwarden process.
+- **Secrets only from `existingSecret`**: the chart never renders secret values.
+- **Hardened pod**: non-root, read-only root filesystem, all capabilities dropped,
+  `RuntimeDefault` seccomp, no service account token unless `serviceAccount.automountToken`.
+- **Run history** on a PersistentVolumeClaim (kept on uninstall by default).
+- **Runner configs** come from the image, or from `runners.configs` in the values (rendered into a
+  ConfigMap; changing them restarts the pod).
+- **Ingress**: the controller must allow WebSocket upgrades and long read timeouts (runs may last
+  as long as `limits.runTimeout`); add the annotations your controller needs.
+- `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
+  (e.g. an SSH key from a Secret).
+
+### Local cluster
+
+`deploy/kind/test.sh` builds both images, installs the chart into a kind cluster and checks that
+scripts run, output streams, the security context is enforced and history survives a pod
+restart. `KEEP=1 deploy/kind/test.sh` leaves it running.
+
+### Releases
+
+Pushing a tag `vX.Y.Z` on `main` builds and publishes the multi-arch image
+(`X.Y.Z`, `X.Y`, `latest`, with SBOM and provenance) and the Helm chart
+(`oci://ghcr.io/catalinmuraru/charts/runwarden`, version `X.Y.Z`).
+
 ## Security model
 
 - Scripts are executed directly with an argument array, never through a shell-built command line.
@@ -286,6 +356,8 @@ go test -race ./...
 golangci-lint run
 govulncheck ./...
 cd web && npm ci && npm test && npm run build
+helm lint --strict deploy/helm/runwarden --set auth.type=none
+docker build -t runwarden .   # CI also scans the image with Trivy
 ```
 
 Without a UI build the binary still compiles; `/` then answers 503 with a hint.
@@ -301,11 +373,14 @@ internal/history/  run records on disk
 internal/api/      REST and WebSocket API
 internal/auth/     sign-in (OIDC, GitLab, LDAP) and sessions
 internal/authz/    who may run scripts and see runs
-deploy/dev/        local Keycloak and OpenLDAP for development
 internal/web/      embedded UI (built into internal/web/dist/)
-examples/          example runner configs and scripts
 web/               Vue 3 + Vite + TypeScript source
-.github/workflows/ CI
+examples/          example runner configs, scripts and scripts image (Dockerfile)
+deploy/helm/       Helm chart
+deploy/kind/       local cluster test
+deploy/dev/        local Keycloak and OpenLDAP for development
+Dockerfile         base image
+.github/workflows/ CI and release
 ```
 
 ## Health checks

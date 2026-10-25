@@ -1,0 +1,13 @@
+# Values for the local kind test: the examples image loaded into the cluster, no sign-in.
+image:
+  repository: runwarden-examples
+  tag: dev
+  pullPolicy: Never
+auth:
+  type: none
+existingSecret: runwarden-env
+limits:
+  runTimeout: 10m
+persistence:
+  size: 1Gi
+  keepOnUninstall: false

@@ -1,0 +1,13 @@
+{{- if .Values.runners.configs }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "runwarden.fullname" . }}-runners
+  labels:
+    {{- include "runwarden.labels" . | nindent 4 }}
+data:
+  {{- range $name, $config := .Values.runners.configs }}
+  {{ $name | trimSuffix ".json" }}.json: |
+    {{- toPrettyJson $config | nindent 4 }}
+  {{- end }}
+{{- end }}

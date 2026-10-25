@@ -1,0 +1,115 @@
+# Image with Runwarden and your scripts. Usually a scripts image built FROM the Runwarden base
+# image (see examples/Dockerfile).
+image:
+  repository: ghcr.io/catalinmuraru/runwarden
+  # Defaults to the chart's appVersion.
+  tag: ""
+  # sha256:... — when set, the image is pulled by digest and tag is ignored.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+auth:
+  # Required: oidc, gitlab, ldap, or none (local development only: no sign-in).
+  type: ""
+  # External URL, e.g. https://runwarden.example.com (required for oidc and gitlab).
+  publicUrl: ""
+  sessionTTL: 12h
+  # true/false; unset means true unless publicUrl is http://.
+  cookieSecure: null
+  adminUsers: []
+  adminGroups: []
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    # Extra scopes, space-separated (e.g. "groups").
+    scopes: ""
+    usernameClaim: ""
+    groupsClaim: ""
+  gitlab:
+    url: ""
+    clientId: ""
+  ldap:
+    url: ""
+    startTLS: false
+    bindDN: ""
+    userBaseDN: ""
+    userFilter: ""
+    groupBaseDN: ""
+    groupFilter: ""
+    groupNameAttr: ""
+    userGroupsAttr: ""
+
+# Name of a Secret, created outside this chart, whose keys become environment variables:
+# SESSION_KEY (required unless auth.type=none), OIDC_CLIENT_SECRET or GITLAB_CLIENT_SECRET,
+# LDAP_BIND_PASSWORD, and RUNNER_ENV_<NAME> variables passed to scripts as <NAME>.
+existingSecret: ""
+
+limits:
+  maxConcurrentRuns: 10
+  runTimeout: 60m
+  killGrace: 10s
+  maxOutputBytes: 10Mi
+  maxUploadBytes: 100Mi
+
+# Extra hosts allowed to open WebSockets (the server's own host always is).
+allowedOrigins: []
+
+runners:
+  # Runner configs as file name → config object. Empty: use the configs baked into the image
+  # (/etc/runwarden/runners). When set, they replace the image's configs.
+  configs: {}
+
+# Run history (DATA_DIR). Without persistence, history is lost when the pod restarts.
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  existingClaim: ""
+  # Keep the claim (and the history) when the release is uninstalled.
+  keepOnUninstall: true
+
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+service:
+  type: ClusterIP
+  port: 80
+
+# The ingress controller must allow WebSocket upgrades and long read timeouts (runs can take
+# an hour); set the matching annotations for your controller.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+  #  - secretName: runwarden-tls
+  #    hosts: [runwarden.example.com]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # Scripts don't get Kubernetes API credentials unless you enable this.
+  automountToken: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# Longer than limits.killGrace, so running scripts are stopped cleanly on shutdown.
+terminationGracePeriodSeconds: 30
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

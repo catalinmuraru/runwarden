@@ -1,0 +1,14 @@
+apiVersion: v2
+name: runwarden
+description: Web UI to run scripts with parameters, live output, history and access control
+type: application
+# Both versions are set from the release tag when the chart is published.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/catalinmuraru/runwarden
+sources:
+  - https://github.com/catalinmuraru/runwarden
+keywords:
+  - scripts
+  - runbook
+  - automation

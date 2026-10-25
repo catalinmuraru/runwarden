@@ -21,12 +21,21 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/web"
 )
 
+// version is set at build time (-ldflags "-X main.version=v1.2.3").
+var version = "dev"
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "check-config" {
-		os.Exit(checkConfig(os.Args[2:], os.Stdout))
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "check-config":
+			os.Exit(checkConfig(os.Args[2:], os.Stdout))
+		case "version", "--version":
+			fmt.Println(version)
+			return
+		}
 	}
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("version", version))
 	if err := run(); err != nil {
 		slog.Error("runwarden stopped", "err", err)
 		os.Exit(1)
