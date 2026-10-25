@@ -61,3 +61,49 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  helm:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      - run: helm lint --strict deploy/helm/runwarden --set auth.type=none
+      - name: Render with representative values
+        run: |
+          helm template t deploy/helm/runwarden -f deploy/kind/values-kind.yaml >/dev/null
+          helm template t deploy/helm/runwarden --set auth.type=oidc,existingSecret=s \
+            --set auth.publicUrl=https://rw.example.com,auth.oidc.issuerUrl=https://idp,auth.oidc.clientId=rw \
+            --set ingress.enabled=true,ingress.host=rw.example.com >/dev/null
+          helm template t deploy/helm/runwarden --set auth.type=ldap,existingSecret=s \
+            --set auth.ldap.url=ldaps://dir,auth.ldap.userBaseDN=dc=example \
+            --set-json 'runners.configs={"hello":{"name":"Hello","script_path":"/bin/echo"}}' >/dev/null
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: runwarden:ci
+          build-args: VERSION=ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test
+        run: |
+          docker run --rm runwarden:ci version
+          docker build -q -f examples/Dockerfile --build-arg BASE=runwarden:ci -t runwarden-examples:ci .
+          docker run --rm --entrypoint runwarden runwarden-examples:ci check-config /etc/runwarden/runners
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: runwarden:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"

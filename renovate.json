@@ -6,7 +6,24 @@
     "docker:pinDigests",
     "helpers:pinGitHubActionDigests"
   ],
-  "enabledManagers": ["gomod", "npm", "nvm", "dockerfile", "docker-compose", "github-actions", "helm-values", "helmv3"],
+  "enabledManagers": ["gomod", "npm", "nvm", "dockerfile", "docker-compose", "github-actions", "helm-values", "helmv3", "custom.regex"],
+  "customManagers": [
+    {
+      "description": "kind node image in deploy/kind/kind-config.yaml",
+      "customType": "regex",
+      "managerFilePatterns": ["/^deploy/kind/kind-config\\.yaml$/"],
+      "matchStrings": ["image: (?<depName>kindest/node):(?<currentValue>v[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)"],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "Helm CLI version used in workflows",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["azure/setup-helm@\\S+[^\\n]*\\n\\s+with:\\n\\s+version: (?<currentValue>v\\S+)"],
+      "depNameTemplate": "helm/helm",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
   "postUpdateOptions": ["gomodTidy"],
   "minimumReleaseAge": "3 days",
   "vulnerabilityAlerts": {
@@ -39,7 +56,7 @@
       "groupName": "GitHub Actions (non-major)"
     },
     {
-      "matchManagers": ["helm-values", "helmv3"],
+      "matchManagers": ["helm-values", "helmv3", "custom.regex"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "Helm (non-major)"
     },
