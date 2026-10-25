@@ -360,6 +360,10 @@ helm lint --strict deploy/helm/runwarden --set auth.type=none
 docker build -t runwarden .   # CI also scans the image with Trivy
 ```
 
+Security checks in CI: CodeQL, govulncheck, gosec (in golangci-lint), Trivy (image and
+Dockerfile/Helm misconfigurations), dependency review on pull requests, zizmor for the workflows,
+and a weekly OpenSSF Scorecard. Secret scanning with push protection is enabled on the repository.
+
 Without a UI build the binary still compiles; `/` then answers 503 with a hint.
 
 ## Project layout
