@@ -30,6 +30,7 @@
     "enabled": true,
     "labels": ["security"]
   },
+  "osvVulnerabilityAlerts": true,
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 6am on monday"]
@@ -59,6 +60,42 @@
       "matchManagers": ["helm-values", "helmv3", "custom.regex"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "Helm (non-major)"
+    },
+    {
+      "description": "Go toolchain: bump the go directive in go.mod together with the golang build image.",
+      "matchDatasources": ["golang-version"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "matchDatasources": ["golang-version"],
+      "groupName": "Go toolchain"
+    },
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["golang"],
+      "groupName": "Go toolchain"
+    },
+    {
+      "description": "Node.js: .nvmrc (CI) and the node build image move together.",
+      "matchManagers": ["nvm"],
+      "groupName": "Node.js"
+    },
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["node"],
+      "groupName": "Node.js"
+    },
+    {
+      "description": "The chart's own image follows the chart appVersion, which the release workflow sets.",
+      "matchManagers": ["helm-values"],
+      "matchPackageNames": ["ghcr.io/catalinmuraru/runwarden"],
+      "enabled": false
+    },
+    {
+      "description": "TypeScript 7 (native compiler) has no JavaScript compiler API, which vue-tsc needs. Majors wait for approval on the Dependency Dashboard; approve once vue-tsc supports them.",
+      "matchPackageNames": ["typescript"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
     },
     {
       "description": "Automerge patch updates once CI is green. A group PR only automerges if every update in it is a patch.",
