@@ -17,3 +17,6 @@ COPY examples/runners/ /etc/runwarden/runners/
 COPY examples/runners/ /opt/runwarden/examples/runners/
 COPY examples/scripts/ /opt/runwarden/examples/scripts/
 COPY examples/archives/ /opt/runwarden/examples/archives/
+
+# The base image already runs as this user; repeat it in case a step above switched to root.
+USER 10001:10001
