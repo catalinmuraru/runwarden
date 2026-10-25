@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -105,9 +107,28 @@ func (e *Executor) start(req Request) (*Run, error) {
 	id := e.nextID()
 	s := req.Script
 	inv := params.Build(s.Parameters, req.Values, id)
-	var fixed map[string]string
+	terminal := s.RequiresTerminal && ptySupported
+	fixed := map[string]string{}
 	if req.User != "" {
-		fixed = map[string]string{"RUNWARDEN_USER": req.User}
+		fixed["RUNWARDEN_USER"] = req.User
+	}
+	if terminal {
+		fixed["TERM"] = "xterm-256color"
+	}
+	tmpDir := ""
+	if e.env.TempRoot != "" {
+		// A private TMPDIR per run, so concurrent runs don't collide on temporary files.
+		tmpDir = filepath.Join(e.env.TempRoot, id)
+		if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+			return nil, fmt.Errorf("run temp dir: %w", err)
+		}
+		fixed["TMPDIR"] = tmpDir
+	}
+	fail := func(err error) (*Run, error) {
+		if tmpDir != "" {
+			_ = os.RemoveAll(tmpDir)
+		}
+		return nil, err
 	}
 	env, refused := e.env.build(inv.Env, fixed)
 	for _, name := range refused {
@@ -120,34 +141,56 @@ func (e *Executor) start(req Request) (*Run, error) {
 	cmd := exec.Command(s.Command[0], args...) //nolint:gosec,noctx // argv from a validated config, no shell
 	cmd.Dir = s.WorkingDirectory
 	cmd.Env = env
-	if err := prepare(cmd); err != nil {
-		return nil, err
-	}
 
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		return nil, err
-	}
-	cmd.Stdout = outW
-	cmd.Stderr = outW // one pipe keeps stdout and stderr in order
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		_ = outR.Close()
-		_ = outW.Close()
-		return nil, err
+	// outR is what we read output from; child is the side the child gets and we close after start.
+	var (
+		outR, child *os.File
+		stdin       io.WriteCloser
+		err         error
+	)
+	if terminal {
+		// One terminal for stdin, stdout and stderr, as when a user runs the script by hand.
+		var tty *os.File
+		outR, tty, err = openPTY()
+		if err != nil {
+			return fail(err)
+		}
+		preparePTY(cmd)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+		stdin, child = outR, tty
+	} else {
+		if err := prepare(cmd); err != nil {
+			return fail(err)
+		}
+		var outW *os.File
+		if outR, outW, err = os.Pipe(); err != nil {
+			return fail(err)
+		}
+		cmd.Stdout = outW
+		cmd.Stderr = outW // one pipe keeps stdout and stderr in order
+		if stdin, err = cmd.StdinPipe(); err != nil {
+			_ = outR.Close()
+			_ = outW.Close()
+			return fail(err)
+		}
+		child = outW
 	}
 
 	timeout := req.Timeout
 	if timeout <= 0 {
 		timeout = e.limits.Timeout
 	}
+	m := newMasker(inv.SecureValues, s.RedactPatterns)
 	r := &Run{
 		ID:         id,
 		ScriptName: s.Name,
 		MaskedArgs: append(append([]string(nil), s.Command[1:]...), inv.MaskedArgs...),
+		Terminal:   terminal,
 		grace:      e.limits.KillGrace,
 		out:        newOutput(e.limits.MaxOutputBytes),
 		done:       make(chan struct{}),
+		mask:       m,
+		tmpDir:     tmpDir,
 		stdin:      stdin,
 		pending:    inv.Stdin,
 		result:     Result{Status: StatusRunning},
@@ -155,31 +198,18 @@ func (e *Executor) start(req Request) (*Run, error) {
 
 	if err := cmd.Start(); err != nil {
 		_ = outR.Close()
-		_ = outW.Close()
-		return nil, fmt.Errorf("start %s: %w", s.Name, err)
+		_ = child.Close()
+		return fail(fmt.Errorf("start %s: %w", s.Name, err))
 	}
-	_ = outW.Close() // the child holds its own copy
+	_ = child.Close() // the child holds its own copy
 	r.pid = cmd.Process.Pid
 	r.Started = time.Now()
 	r.result.Started = r.Started
-	logger().Info("run started", "run", id, "script", s.Name, "args", r.MaskedArgs, "timeout", timeout)
+	logger().Info("run started", "run", id, "script", s.Name, "args", r.MaskedArgs, "timeout", timeout, "terminal", terminal)
 
-	m := newMasker(inv.SecureValues)
 	pumpDone := make(chan struct{})
 	r.answerPrompts(nil) // stdin values that don't wait for a prompt
-	go func() {
-		defer close(pumpDone)
-		buf := make([]byte, 32<<10)
-		for {
-			n, err := outR.Read(buf)
-			if n > 0 {
-				r.handle(buf[:n], m)
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
+	go r.pump(outR, m, pumpDone)
 	timer := time.AfterFunc(timeout, func() { r.stop(StatusTimedOut) })
 	go r.supervise(cmd, outR, pumpDone, m, timer)
 

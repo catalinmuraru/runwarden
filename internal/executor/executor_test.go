@@ -54,7 +54,7 @@ func waitDone(t *testing.T, r *Run) Result {
 
 func outputOf(r *Run) string {
 	data, _, _ := r.Output(0)
-	return string(data)
+	return strings.ReplaceAll(string(data), "\r\n", "\n") // terminals end lines with CRLF
 }
 
 // waitOutput blocks until the run's output contains text.
@@ -150,11 +150,11 @@ func TestOutputOrder(t *testing.T) {
 func TestInteractiveInput(t *testing.T) {
 	r := mustStart(t, New(Limits{}, EnvPolicy{}), Request{Script: testScript(t, "prompt.sh")})
 	waitOutput(t, r, "Continue? ")
-	if err := r.WriteInput("yes"); err != nil {
+	if err := r.WriteInput("yes", false); err != nil {
 		t.Fatal(err)
 	}
 	waitOutput(t, r, "Name? ")
-	if err := r.WriteInput("Ada"); err != nil {
+	if err := r.WriteInput("Ada", false); err != nil {
 		t.Fatal(err)
 	}
 	res := waitDone(t, r)
@@ -162,7 +162,7 @@ func TestInteractiveInput(t *testing.T) {
 	if res.Status != StatusFinished || !strings.Contains(out, "first=yes") || !strings.Contains(out, "second=Ada") {
 		t.Errorf("result %+v, output:\n%s", res, out)
 	}
-	if err := r.WriteInput("late"); !errors.Is(err, ErrInputClosed) {
+	if err := r.WriteInput("late", false); !errors.Is(err, ErrInputClosed) {
 		t.Errorf("WriteInput after exit = %v, want ErrInputClosed", err)
 	}
 }
@@ -190,7 +190,7 @@ func TestCloseInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitDone(t, r) // reads see end of input, the script runs to its end
-	if err := r.WriteInput("x"); !errors.Is(err, ErrInputClosed) {
+	if err := r.WriteInput("x", false); !errors.Is(err, ErrInputClosed) {
 		t.Errorf("WriteInput after CloseInput = %v", err)
 	}
 }

@@ -54,6 +54,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- with $a.adminUsers }}{{ $_ := set $e "ADMIN_USERS" (join "," .) }}{{ end -}}
 {{- with $a.adminGroups }}{{ $_ := set $e "ADMIN_GROUPS" (join "," .) }}{{ end -}}
 {{- with .Values.allowedOrigins }}{{ $_ := set $e "ALLOWED_ORIGINS" (join "," .) }}{{ end -}}
+{{- with .Values.trustedProxies }}{{ $_ := set $e "TRUSTED_PROXIES" (join "," .) }}{{ end -}}
+{{- $_ := set $e "HISTORY_MAX_AGE" (toString .Values.history.maxAge) -}}
+{{- $_ := set $e "HISTORY_MAX_RUNS" (toString .Values.history.maxRuns) -}}
+{{- if .Values.workspace.enabled }}{{ $_ := set $e "RUNNER_ENV_RUNWARDEN_WORKSPACE" "/var/lib/runwarden-work" }}{{ end -}}
 {{- if eq $type "oidc" -}}
 {{- $_ := set $e "OIDC_ISSUER_URL" (required "auth.oidc.issuerUrl is required" $a.oidc.issuerUrl) -}}
 {{- $_ := set $e "OIDC_CLIENT_ID" (required "auth.oidc.clientId is required" $a.oidc.clientId) -}}

@@ -86,6 +86,7 @@ type rawScript struct {
 	AllowedUsers     []string          `json:"allowed_users"`
 	AdminUsers       []string          `json:"admin_users"`
 	OutputFiles      []string          `json:"output_files"`
+	RedactPatterns   []string          `json:"redact_patterns"`
 	RequiresTerminal *flexBool         `json:"requires_terminal"`
 	Scheduling       *rawScheduling    `json:"scheduling"`
 	Hidden           flexBool          `json:"hidden"`

@@ -59,6 +59,27 @@ func TestLoadAppValues(t *testing.T) {
 	}
 }
 
+func TestLoadAppRetentionAndProxies(t *testing.T) {
+	app, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none"}))
+	if err != nil || app.HistoryMaxAge != 90*24*time.Hour || app.HistoryMaxRuns != 0 || app.TrustedProxies != nil {
+		t.Errorf("defaults: %+v %v", app, err)
+	}
+	app, err = LoadApp(env(map[string]string{
+		"AUTH_TYPE": "none", "HISTORY_MAX_AGE": "30d", "HISTORY_MAX_RUNS": "500", "TRUSTED_PROXIES": "10.0.0.0/8, 192.168.0.1",
+	}))
+	if err != nil || app.HistoryMaxAge != 30*24*time.Hour || app.HistoryMaxRuns != 500 ||
+		!slices.Equal(app.TrustedProxies, []string{"10.0.0.0/8", "192.168.0.1"}) {
+		t.Errorf("values: %+v %v", app, err)
+	}
+	if app, _ := LoadApp(env(map[string]string{"AUTH_TYPE": "none", "HISTORY_MAX_AGE": "0"})); app.HistoryMaxAge != 0 {
+		t.Errorf("0 should keep history forever: %v", app.HistoryMaxAge)
+	}
+	_, err = LoadApp(env(map[string]string{"AUTH_TYPE": "none", "HISTORY_MAX_AGE": "soon", "HISTORY_MAX_RUNS": "-1"}))
+	if err == nil || !strings.Contains(err.Error(), "HISTORY_MAX_AGE") || !strings.Contains(err.Error(), "HISTORY_MAX_RUNS") {
+		t.Errorf("invalid values: %v", err)
+	}
+}
+
 func TestLoadAppInvalid(t *testing.T) {
 	_, err := LoadApp(env(map[string]string{
 		"MAX_CONCURRENT_RUNS": "many",

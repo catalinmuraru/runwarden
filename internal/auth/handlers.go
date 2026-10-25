@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
+
 	"net/http"
 	"net/url"
 	"path"
@@ -16,6 +16,9 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/catalinmuraru/runwarden/internal/audit"
+	"github.com/catalinmuraru/runwarden/internal/clientip"
 )
 
 // Options configure the auth handlers.
@@ -25,6 +28,7 @@ type Options struct {
 	Redirect       RedirectProvider // oidc, gitlab
 	Password       PasswordProvider // ldap
 	AllowedOrigins []string         // extra hosts trusted for state-changing requests
+	ClientIP       clientip.Resolver
 	IsAdmin        func(User) bool
 	// RelevantGroups lists the groups that matter for authorization. When a user has too many
 	// groups for the session cookie, only these are kept.
@@ -139,17 +143,19 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if e := q.Get("error"); e != "" {
 		slog.Warn("auth: provider refused sign-in", "error", e, "description", q.Get("error_description"))
+		h.auditLogin(r, User{}, false, "refused by the identity provider: "+e)
 		http.Error(w, "Sign-in was cancelled or refused by the identity provider.", http.StatusUnauthorized)
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(st.State)) != 1 {
+		h.auditLogin(r, User{}, false, "state mismatch")
 		http.Error(w, "Sign-in state mismatch. Please sign in again.", http.StatusBadRequest)
 		return
 	}
 	u, err := h.opts.Redirect.Exchange(r.Context(), q.Get("code"), st.Verifier, st.Nonce)
 	if err != nil {
 		slog.Warn("auth: sign-in failed", "err", err)
-		auditLogin(r, "", false)
+		h.auditLogin(r, User{}, false, "sign-in with the identity provider failed")
 		http.Error(w, "Sign-in failed.", http.StatusUnauthorized)
 		return
 	}
@@ -158,7 +164,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Sign-in failed.", http.StatusInternalServerError)
 		return
 	}
-	auditLogin(r, u.Name, true)
+	h.auditLogin(r, u, true, "")
 	http.Redirect(w, r, st.Next, http.StatusFound)
 }
 
@@ -177,9 +183,9 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"username\": ..., \"password\": ...}"})
 		return
 	}
-	key := strings.ToLower(strings.TrimSpace(c.Username)) + "|" + clientIP(r)
+	key := strings.ToLower(strings.TrimSpace(c.Username)) + "|" + h.opts.ClientIP.IP(r)
 	if !h.limit.allowed(key) {
-		auditLogin(r, c.Username, false)
+		h.auditLogin(r, User{Name: c.Username}, false, "too many failed sign-ins")
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed sign-ins, try again later"})
 		return
 	}
@@ -187,7 +193,7 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, ErrInvalidCredentials):
 		h.limit.fail(key)
-		auditLogin(r, c.Username, false)
+		h.auditLogin(r, User{Name: c.Username}, false, "invalid user name or password")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": ErrInvalidCredentials.Error()})
 		return
 	case err != nil:
@@ -201,7 +207,7 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sign-in failed"})
 		return
 	}
-	auditLogin(r, u.Name, true)
+	h.auditLogin(r, u, true, "")
 	writeJSON(w, http.StatusOK, h.meBody(u))
 }
 
@@ -223,7 +229,7 @@ func (h *Handler) startSession(w http.ResponseWriter, u User) error {
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	if h.opts.Sessions != nil {
 		if u, ok := h.opts.Sessions.Get(r); ok {
-			slog.Info("audit", "audit", true, "action", "logout", "user", u.Name)
+			h.record(r, u, audit.Event{Action: audit.Logout, Category: "authentication", Type: "end", Success: true, Message: "signed out: " + u.Name})
 		}
 		h.opts.Sessions.Clear(w)
 	}
@@ -256,12 +262,21 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.meBody(u))
 }
 
-func auditLogin(r *http.Request, user string, success bool) {
-	result := "failure"
-	if success {
-		result = "success"
+// auditLogin records a sign-in attempt. Passwords are never passed here.
+func (h *Handler) auditLogin(r *http.Request, u User, success bool, reason string) {
+	msg := "signed in: " + u.Name
+	if !success {
+		msg = "sign-in failed: " + reason
 	}
-	slog.Info("audit", "audit", true, "action", "login", "user", user, "result", result, "client", clientIP(r))
+	h.record(r, u, audit.Event{Action: audit.Login, Category: "authentication", Type: "start",
+		Success: success, Reason: reason, Message: msg})
+}
+
+func (h *Handler) record(r *http.Request, u User, e audit.Event) {
+	e.User, e.Groups = u.Name, u.Groups
+	e.SourceIP = h.opts.ClientIP.IP(r)
+	e.UserAgent = r.UserAgent()
+	audit.Log(r.Context(), e)
 }
 
 // safeNext allows only local paths, so the login can't be used as an open redirect.
@@ -273,14 +288,6 @@ func safeNext(next string) string {
 		return "/"
 	}
 	return next
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func randomString() string {

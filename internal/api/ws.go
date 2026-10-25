@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 )
 
@@ -23,8 +24,9 @@ const (
 
 // Client → server messages.
 type wsIn struct {
-	Type string `json:"type"` // input, close_input, stop, kill
-	Line string `json:"line,omitempty"`
+	Type   string `json:"type"` // input, close_input, stop, kill
+	Line   string `json:"line,omitempty"`
+	Secret bool   `json:"secret,omitempty"` // hidden input, masked in the output
 }
 
 // Server → client messages.
@@ -91,16 +93,16 @@ func (s *Server) socketCommands(ctx context.Context, cancel context.CancelFunc, 
 		var err error
 		switch msg.Type {
 		case "input":
-			err = run.WriteInput(msg.Line)
-			audit(r, "run.input", "run", run.ID)
+			err = run.WriteInput(msg.Line, msg.Secret)
+			s.recordRunAction(r, audit.RunInput, run, err)
 		case "close_input":
 			err = run.CloseInput()
 		case "stop":
 			run.Stop()
-			audit(r, "run.stop", "run", run.ID, "script", run.ScriptName)
+			s.recordRunAction(r, audit.RunStop, run, nil)
 		case "kill":
 			run.Kill()
-			audit(r, "run.kill", "run", run.ID, "script", run.ScriptName)
+			s.recordRunAction(r, audit.RunKill, run, nil)
 		default:
 			err = errors.New("unknown message type")
 		}

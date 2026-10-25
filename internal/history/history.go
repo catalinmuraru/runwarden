@@ -44,6 +44,7 @@ type Meta struct {
 	Finished        *time.Time     `json:"finished,omitempty"`
 	OutputTruncated bool           `json:"output_truncated,omitempty"`
 	Files           []string       `json:"files,omitempty"`
+	Terminal        bool           `json:"terminal,omitempty"`
 }
 
 // OutputFiles says which files a run produces for download.
@@ -142,6 +143,32 @@ func (s *Store) Track(run *executor.Run, meta Meta, files OutputFiles, onDone fu
 		}
 	}()
 	return nil
+}
+
+// Cleanup removes finished runs older than maxAge (0: no age limit) and, beyond the newest
+// maxRuns (0: no count limit), the oldest ones. Running runs are never removed. It returns how
+// many runs were removed.
+func (s *Store) Cleanup(maxAge time.Duration, maxRuns int, now time.Time) (int, error) {
+	all, err := s.all() // newest first
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for i, m := range all {
+		if m.Status == string(executor.StatusRunning) {
+			continue
+		}
+		tooOld := maxAge > 0 && now.Sub(m.Started) > maxAge
+		tooMany := maxRuns > 0 && i >= maxRuns
+		if !tooOld && !tooMany {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(s.dir, m.ID)); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 // Filter narrows List.

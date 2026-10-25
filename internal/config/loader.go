@@ -201,6 +201,13 @@ func (l *loader) build(file string, obj map[string]json.RawMessage) (*Script, er
 		SourceFile:       file,
 		IncludeTemplates: templates,
 	}
+	for _, pattern := range raw.RedactPatterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("redact_patterns: %w", err)
+		}
+		s.RedactPatterns = append(s.RedactPatterns, re)
+	}
 	seen := map[string]bool{}
 	for _, data := range raw.Parameters {
 		p, err := l.buildParam(file, data)

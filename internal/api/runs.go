@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
@@ -29,8 +31,18 @@ type startBody struct {
 }
 
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
-	sc := s.allowedScript(r, r.PathValue("name"))
+	name := r.PathValue("name")
+	refused := func(reason string) {
+		s.record(r, audit.Event{Action: audit.RunStart, Category: "process", Type: "start",
+			Reason: reason, Script: name, Message: "run refused: " + reason})
+	}
+	sc := s.allowedScript(r, name)
 	if sc == nil {
+		if s.script(name) != nil {
+			refused("not allowed to run this script")
+		} else {
+			refused("unknown script")
+		}
 		writeError(w, http.StatusNotFound, "unknown script")
 		return
 	}
@@ -38,6 +50,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	uploadDir, err := s.newUploadDir()
 	if err != nil {
 		slog.Error("create upload dir", "err", err)
+		refused("internal error")
 		writeError(w, http.StatusInternalServerError, "could not start the run")
 		return
 	}
@@ -50,15 +63,19 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 
 	raw, status, err := s.readRunInput(w, r, sc, uploadDir)
 	if err != nil {
+		refused("invalid request")
 		writeError(w, status, err.Error())
 		return
 	}
 	values, err := sc.Values(raw)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid parameters", errorList(err)...)
+		details := errorList(err)
+		refused("invalid parameters: " + strings.Join(details, "; "))
+		writeError(w, http.StatusBadRequest, "invalid parameters", details...)
 		return
 	}
 	if problems := s.checkDynamicValues(r, sc, raw, values); len(problems) > 0 {
+		refused("invalid parameters: " + strings.Join(problems, "; "))
 		writeError(w, http.StatusBadRequest, "invalid parameters", problems...)
 		return
 	}
@@ -67,19 +84,35 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name})
 	switch {
 	case errors.Is(err, executor.ErrBusy):
+		refused("too many runs in progress")
 		writeError(w, http.StatusTooManyRequests, "too many runs in progress, try again later")
 		return
 	case err != nil:
 		slog.Error("start run", "script", sc.Name, "err", err)
+		refused("start failed")
 		writeError(w, http.StatusInternalServerError, "could not start the run")
 		return
 	}
 	started = true
 
 	masked := params.MaskValues(sc.Parameters, values)
-	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked}
+	// The end event is written when the run is over, possibly long after this request: capture
+	// who started it now.
+	end := audit.Event{Action: audit.RunEnd, Category: "process", Type: "end", RunID: run.ID, Script: sc.Name,
+		User: user.Name, Groups: user.Groups, SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(),
+		Values: masked, Args: run.MaskedArgs}
+	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Terminal: run.Terminal}
 	files := history.OutputFiles{Patterns: sc.OutputFiles, Dir: sc.WorkingDirectory}
 	err = s.hist.Track(run, meta, files, func() {
+		res := run.Result()
+		code := res.ExitCode
+		end.Status, end.ExitCode, end.Duration = string(res.Status), &code, res.Finished.Sub(res.Started)
+		end.Success = res.Status == executor.StatusFinished
+		if !end.Success {
+			end.Reason = string(res.Status)
+		}
+		end.Message = fmt.Sprintf("run %s of %q by %s: %s (exit code %d)", run.ID, sc.Name, user.Name, res.Status, code)
+		audit.Log(context.Background(), end)
 		s.exec.Forget(run.ID)
 		_ = os.RemoveAll(uploadDir)
 	})
@@ -87,10 +120,13 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		// A run that cannot be recorded must not continue unaudited.
 		slog.Error("record run; killing it", "run", run.ID, "err", err)
 		run.Kill()
+		refused("could not record the run")
 		writeError(w, http.StatusInternalServerError, "could not record the run")
 		return
 	}
-	audit(r, "run.start", "script", sc.Name, "run", run.ID, "values", masked)
+	s.record(r, audit.Event{Action: audit.RunStart, Category: "process", Type: "start", Success: true,
+		RunID: run.ID, Script: sc.Name, Values: masked, Args: run.MaskedArgs,
+		Message: fmt.Sprintf("run %s of %q started by %s", run.ID, sc.Name, user.Name)})
 
 	w.Header().Set("Location", "/api/runs/"+run.ID)
 	writeJSON(w, http.StatusCreated, map[string]string{"id": run.ID, "status": string(executor.StatusRunning)})
@@ -332,6 +368,8 @@ func (s *Server) runOutput(w http.ResponseWriter, r *http.Request) {
 type inputBody struct {
 	Line  *string `json:"line"`
 	Close bool    `json:"close"`
+	// Secret marks hidden input: it is masked wherever it would appear in the output.
+	Secret bool `json:"secret"`
 }
 
 func (s *Server) runInput(w http.ResponseWriter, r *http.Request) {
@@ -347,18 +385,18 @@ func (s *Server) runInput(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch {
 	case body.Line != nil:
-		err = run.WriteInput(*body.Line)
+		err = run.WriteInput(*body.Line, body.Secret)
 	case body.Close:
 		err = run.CloseInput()
 	default:
 		writeError(w, http.StatusBadRequest, `send {"line": "..."} or {"close": true}`)
 		return
 	}
+	s.recordRunAction(r, audit.RunInput, run, err)
 	if err != nil {
 		writeError(w, http.StatusConflict, "the run does not accept input")
 		return
 	}
-	audit(r, "run.input", "run", run.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -367,14 +405,13 @@ func (s *Server) runSignal(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	action := "stop"
 	if strings.HasSuffix(r.URL.Path, "/kill") {
-		action = "kill"
 		run.Kill()
+		s.recordRunAction(r, audit.RunKill, run, nil)
 	} else {
 		run.Stop()
+		s.recordRunAction(r, audit.RunStop, run, nil)
 	}
-	audit(r, "run."+action, "run", run.ID, "script", run.ScriptName)
 	w.WriteHeader(http.StatusAccepted)
 }
 

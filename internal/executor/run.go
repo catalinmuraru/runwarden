@@ -46,11 +46,14 @@ type Run struct {
 	ScriptName string
 	Started    time.Time
 	MaskedArgs []string // arguments with secure values masked, for display and audit
+	Terminal   bool     // runs on a pseudo-terminal: input is echoed by the terminal
 
-	pid   int
-	grace time.Duration
-	out   *output
-	done  chan struct{}
+	pid    int
+	grace  time.Duration
+	out    *output
+	done   chan struct{}
+	mask   *masker
+	tmpDir string // per-run TMPDIR, removed when the run ends
 
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser // nil once closed
@@ -89,19 +92,30 @@ func (r *Run) Output(offset int) (data []byte, next int, done bool) {
 // Fetch a fresh channel after each notification.
 func (r *Run) Changed() <-chan struct{} { return r.out.notify() }
 
-// WriteInput sends one line of input to the script.
-func (r *Run) WriteInput(line string) error {
+// WriteInput sends one line of input to the script. Secret input is masked wherever it would
+// appear in the output, e.g. when a terminal echoes it.
+func (r *Run) WriteInput(line string, secret bool) error {
+	if secret && r.mask != nil {
+		r.mask.addSecret(line)
+	}
 	r.stdinMu.Lock()
 	defer r.stdinMu.Unlock()
 	return r.writeLocked(line)
 }
 
-// CloseInput closes the script's stdin, so reads see end of input.
+// CloseInput signals end of input: it closes the script's stdin, or on a terminal sends the
+// end-of-file character (Ctrl-D), as a user at a terminal would.
 func (r *Run) CloseInput() error {
 	r.stdinMu.Lock()
 	defer r.stdinMu.Unlock()
 	if r.stdin == nil {
 		return ErrInputClosed
+	}
+	if r.Terminal {
+		if _, err := io.WriteString(r.stdin, "\x04"); err != nil {
+			return ErrInputClosed
+		}
+		return nil
 	}
 	err := r.stdin.Close()
 	r.stdin = nil
@@ -199,6 +213,34 @@ func (r *Run) answerPrompts(raw []byte) {
 	}
 }
 
+// idleFlush is how long output may be quiet before held-back bytes (kept for masking) are
+// released, so prompts without a newline still reach the user.
+const idleFlush = 200 * time.Millisecond
+
+// pump reads the script's output until the stream closes.
+func (r *Run) pump(outR *os.File, m *masker, done chan<- struct{}) {
+	defer close(done)
+	buf := make([]byte, 32<<10)
+	for {
+		if m.pendingLen() > 0 {
+			_ = outR.SetReadDeadline(time.Now().Add(idleFlush))
+		} else {
+			_ = outR.SetReadDeadline(time.Time{})
+		}
+		n, err := outR.Read(buf)
+		if n > 0 {
+			r.handle(buf[:n], m)
+		}
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			r.out.append(m.flush())
+			continue
+		}
+		if err != nil {
+			return // EOF, or EIO on a terminal once every process holding it has exited
+		}
+	}
+}
+
 // supervise waits for the process, cleans up leftover children, drains output and records
 // the result.
 func (r *Run) supervise(cmd *exec.Cmd, outR *os.File, pumpDone <-chan struct{}, m *masker, timer *time.Timer) {
@@ -220,11 +262,15 @@ func (r *Run) supervise(cmd *exec.Cmd, outR *os.File, pumpDone <-chan struct{}, 
 		}
 	}
 	r.out.append(m.flush())
+	_ = outR.Close() // for a terminal this is the master side, which also carried stdin
 
 	r.stdinMu.Lock()
-	r.stdin = nil // exec closes the pipe after Wait
+	r.stdin = nil // exec closes a stdin pipe after Wait
 	r.pending = nil
 	r.stdinMu.Unlock()
+	if r.tmpDir != "" {
+		_ = os.RemoveAll(r.tmpDir)
+	}
 
 	r.mu.Lock()
 	code := -1

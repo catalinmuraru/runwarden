@@ -173,6 +173,8 @@ func TestLoadErrorsDoNotBlockOtherFiles(t *testing.T) {
 		"dup_param.json":      `{"name": "H", "script_path": "run.sh", "parameters": [{"name": "x"}, {"name": "x"}]}`,
 		"bad_mode.json":       `{"name": "I", "script_path": "run.sh", "parameters": [{"name": "x", "multiselect_argument_type": "weird"}]}`,
 		"bad_quote.json":      `{"name": "J", "script_path": "'run.sh"}`,
+		"bad_redact.json":     `{"name": "M", "script_path": "run.sh", "redact_patterns": ["(?=x)"]}`,
+		"redact.json":         `{"name": "N", "script_path": "run.sh", "redact_patterns": ["ghp_[A-Za-z0-9]+"]}`,
 		"shell_values.json":   `{"name": "K", "script_path": "run.sh", "parameters": [{"name": "x", "type": "list", "values": {"script": "ls /var | grep log"}}]}`,
 		"unknown_passas.json": `{"name": "L", "script_path": "run.sh", "parameters": [{"name": "x", "pass_as": "telepathy"}]}`,
 	}
@@ -191,7 +193,7 @@ func TestLoadErrorsDoNotBlockOtherFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, want := scriptNames(cat), []string{"D", "Good", "K", "L", "Nested", "Templated"}; !slices.Equal(got, want) {
+	if got, want := scriptNames(cat), []string{"D", "Good", "K", "L", "N", "Nested", "Templated"}; !slices.Equal(got, want) {
 		t.Errorf("scripts = %q, want %q", got, want)
 	}
 	failed := map[string]bool{}
@@ -200,13 +202,13 @@ func TestLoadErrorsDoNotBlockOtherFiles(t *testing.T) {
 	}
 	for _, name := range []string{"bad_json.json", "bad_bool.json", "no_default.json",
 		"zz_duplicate.json", "bad_regex.json", "no_script.json", "no_file_dir.json", "dup_param.json",
-		"bad_mode.json", "bad_quote.json"} {
+		"bad_mode.json", "bad_quote.json", "bad_redact.json"} {
 		if !failed[name] {
 			t.Errorf("expected an error for %s; errors: %v", name, cat.Errors)
 		}
 	}
-	if len(cat.Errors) != 10 {
-		t.Errorf("got %d errors, want 10: %v", len(cat.Errors), cat.Errors)
+	if len(cat.Errors) != 11 {
+		t.Errorf("got %d errors, want 11: %v", len(cat.Errors), cat.Errors)
 	}
 
 	warned := map[string]bool{}

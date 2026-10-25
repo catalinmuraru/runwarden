@@ -23,7 +23,7 @@ func TestMasker(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newMasker(tt.secrets)
+			m := newMasker(tt.secrets, nil)
 			var got []byte
 			for _, c := range tt.chunks {
 				got = append(got, m.write([]byte(c))...)

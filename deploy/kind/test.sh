@@ -62,6 +62,18 @@ result=$(timeout 30 websocat -t --no-close "ws://127.0.0.1:$PORT/api/runs/$ID/ws
 echo "result: $result"
 echo "$result" | jq -e '.status == "finished"' >/dev/null || fail "run did not finish"
 curl -fs "$B/api/runs/$ID/output" | grep -q '\[--service\]' || fail "output missing"
+curl -fs "$B/api/runs/$ID" | jq -e '.terminal == true' >/dev/null || fail "run did not get a terminal"
+echo "ran on a terminal"
+
+step "Audit log (ECS) in the pod log"
+kubectl -n "$NS" logs deploy/runwarden | jq -ec --arg id "$ID" \
+  'select(.event.dataset == "runwarden.audit" and .event.action == "run-end" and .runwarden.run.id == $id)
+   | {action: .event.action, outcome: .event.outcome, user: .user.name, exit: .process.exit_code, script: .runwarden.script.name}' \
+  || fail "no run-end audit event for $ID"
+
+step "Workspace"
+kubectl -n "$NS" exec deploy/runwarden -- sh -c 'touch /var/lib/runwarden-work/probe && echo "workspace writable"' \
+  || fail "workspace not writable"
 
 step "Security context"
 kubectl -n "$NS" exec deploy/runwarden -- id | grep -q 'uid=10001' || fail "not running as 10001"
