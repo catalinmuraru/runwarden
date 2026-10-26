@@ -20,7 +20,7 @@ func get(t *testing.T, h http.Handler, method, path string) int {
 func TestProbes(t *testing.T) {
 	apiSrv := api.New(api.Options{}, nil, nil)
 	mux := newHealthMux(apiSrv)
-	public := newMux(apiSrv, auth.New(auth.Options{Type: config.AuthNone}))
+	public := newMux(apiSrv, auth.New(auth.Options{NoAuth: true}))
 	for _, p := range []string{"/healthz", "/readyz"} {
 		if code := get(t, public, http.MethodGet, p); code != http.StatusNotFound {
 			t.Errorf("GET %s on the main port = %d, want 404", p, code)

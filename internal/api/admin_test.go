@@ -11,6 +11,7 @@ import (
 
 	"github.com/catalinmuraru/runwarden/internal/activity"
 	"github.com/catalinmuraru/runwarden/internal/audit"
+	"github.com/catalinmuraru/runwarden/internal/auth"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
 )
@@ -121,5 +122,55 @@ func TestScriptTimeout(t *testing.T) {
 
 	if m := e.finish(e.start("Sleep", nil)); m.Status != string(executor.StatusTimedOut) {
 		t.Errorf("status = %s, want %s", m.Status, executor.StatusTimedOut)
+	}
+}
+
+type fakeSessions struct{ revoked []string }
+
+func (f *fakeSessions) Summary() map[string]auth.SessionSummary {
+	return map[string]auth.SessionSummary{"alice": {Count: 2, Methods: []string{"gitlab"}, LastSeen: time.Now()}}
+}
+
+func (f *fakeSessions) RevokeUser(name string) int {
+	f.revoked = append(f.revoked, name)
+	return 2
+}
+
+func TestAdminSessions(t *testing.T) {
+	acts, _ := activity.Open(t.TempDir(), time.Hour)
+	audit.SetSink(acts.Add)
+	t.Cleanup(func() { audit.SetSink(nil) })
+	sessions := &fakeSessions{}
+	alice := setup(t, executor.Limits{}, Options{Activity: acts, Sessions: sessions})
+	root := alice.as("root", "")
+	alice.do(http.MethodGet, "/api/scripts", nil) // alice is known to the users index
+	root.do(http.MethodGet, "/api/scripts", nil)
+
+	_, body := root.do(http.MethodGet, "/api/admin/users", nil)
+	var users struct{ Users []adminUser }
+	_ = json.Unmarshal(body, &users)
+	for _, u := range users.Users {
+		switch u.Name {
+		case "alice":
+			if u.Sessions != 2 || u.Status != activity.StatusActive || len(u.Methods) != 1 {
+				t.Errorf("alice = %+v", u)
+			}
+		case "root":
+			if u.Sessions != 0 || u.Status != activity.StatusSignedOut {
+				t.Errorf("root without sessions = %+v", u)
+			}
+		}
+	}
+
+	if code, _ := alice.do(http.MethodPost, "/api/admin/users/bob/sign-out", nil); code != http.StatusNotFound {
+		t.Errorf("non-admin sign-out = %d, want 404", code)
+	}
+	code, body := root.do(http.MethodPost, "/api/admin/users/alice/sign-out", nil)
+	if code != http.StatusOK || !strings.Contains(string(body), `"revoked":2`) || len(sessions.revoked) != 1 || sessions.revoked[0] != "alice" {
+		t.Errorf("sign-out = %d %s %v", code, body, sessions.revoked)
+	}
+	events, _ := acts.Query(activity.Filter{Action: audit.SessionRevoke})
+	if len(events) != 1 || events[0].User != "root" || !strings.Contains(events[0].Reason, "alice") {
+		t.Errorf("revoke not audited: %+v", events)
 	}
 }

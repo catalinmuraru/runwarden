@@ -54,6 +54,14 @@ func devSessions(t *testing.T) *Sessions {
 	return s
 }
 
+func devStore(t *testing.T) *Store {
+	s, err := OpenStore(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 func me(t *testing.T, client *http.Client) (meResponse, int) {
 	t.Helper()
 	resp, err := send(t, client, http.MethodGet, "http://"+appAddr+"/api/me", "", "")
@@ -74,7 +82,7 @@ func browserLogin(t *testing.T, user, password string) *http.Client {
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar, Timeout: 30 * time.Second}
 
-	resp, err := send(t, client, http.MethodGet, "http://"+appAddr+"/auth/login", "", "")
+	resp, err := send(t, client, http.MethodGet, "http://"+appAddr+"/auth/login?method=oidc", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +113,7 @@ func TestIntegrationOIDCKeycloak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serve(t, New(Options{Type: "oidc", Sessions: devSessions(t), Redirect: p}))
+	serve(t, New(Options{Methods: []Method{{ID: "oidc", Redirect: p}}, Cookies: devSessions(t), Store: devStore(t)}))
 
 	for _, tc := range []struct {
 		user, password string
@@ -152,10 +160,10 @@ func TestIntegrationLDAP(t *testing.T) {
 	}
 
 	// Through the HTTP handler: POST /auth/login, then /api/me with the session cookie.
-	serve(t, New(Options{Type: "ldap", Sessions: devSessions(t), Password: p}))
+	serve(t, New(Options{Methods: []Method{{ID: "ldap", Password: p}}, Cookies: devSessions(t), Store: devStore(t)}))
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar, Timeout: 10 * time.Second}
-	resp, err := send(t, client, http.MethodPost, "http://"+appAddr+"/auth/login", "application/json", `{"username":"alice","password":"alice-password"}`)
+	resp, err := send(t, client, http.MethodPost, "http://"+appAddr+"/auth/login", "application/json", `{"method":"ldap","username":"alice","password":"alice-password"}`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -72,7 +72,7 @@ main.container { padding-top: 1.25rem; padding-bottom: 3rem; }
 .btn-quiet { border-color: transparent; background: transparent; }
 
 .badge {
-  display: inline-block; font-size: 0.8rem; font-weight: 600; padding: 0.05rem 0.5rem;
+  display: inline-block; white-space: nowrap; font-size: 0.8rem; font-weight: 600; padding: 0.05rem 0.5rem;
   border-radius: 999px; border: 1px solid currentColor;
 }
 .tone-info { color: var(--info); }

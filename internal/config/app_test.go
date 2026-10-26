@@ -100,64 +100,91 @@ func TestLoadAppInvalid(t *testing.T) {
 const testKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" // 32 bytes
 
 func TestLoadAuth(t *testing.T) {
+	gitlab := map[string]string{"GITLAB_URL": "https://gitlab.example.com/", "GITLAB_CLIENT_ID": "rw", "GITLAB_CLIENT_SECRET": "s"}
+	oidc := map[string]string{"OIDC_ISSUER_URL": "https://idp", "OIDC_CLIENT_ID": "rw", "OIDC_CLIENT_SECRET": "s"}
+	ldap := map[string]string{"LDAP_URL": "ldaps://dir", "LDAP_USER_BASE_DN": "ou=people,dc=x"}
+	with := func(maps ...map[string]string) map[string]string {
+		out := map[string]string{"SESSION_KEY": testKey, "PUBLIC_URL": "https://rw.example.com/"}
+		for _, m := range maps {
+			for k, v := range m {
+				out[k] = v
+			}
+		}
+		return out
+	}
 	tests := []struct {
 		name    string
 		vars    map[string]string
 		wantErr []string
 		check   func(t *testing.T, a Auth)
 	}{
-		{name: "missing type", vars: nil, wantErr: []string{"AUTH_TYPE is required"}},
-		{name: "unknown type", vars: map[string]string{"AUTH_TYPE": "kerberos"}, wantErr: []string{"unknown value"}},
+		{name: "missing methods", vars: nil, wantErr: []string{"AUTH_METHODS is required"}},
+		{name: "unknown method", vars: map[string]string{"AUTH_METHODS": "kerberos"}, wantErr: []string{`unknown method "kerberos"`}},
+		{name: "duplicate", vars: with(gitlab, map[string]string{"AUTH_METHODS": "gitlab,gitlab"}), wantErr: []string{"listed twice"}},
+		{name: "none with others", vars: map[string]string{"AUTH_METHODS": "none,ldap", "ALLOW_NO_AUTH": "true"}, wantErr: []string{"cannot be combined"}},
+		{name: "none with admin", vars: map[string]string{"AUTH_METHODS": "none", "ALLOW_NO_AUTH": "true", "INITIAL_ADMIN": "true"}, wantErr: []string{"cannot be combined"}},
 		{
 			name:    "oidc missing settings",
-			vars:    map[string]string{"AUTH_TYPE": "oidc"},
+			vars:    map[string]string{"AUTH_METHODS": "oidc"},
 			wantErr: []string{"SESSION_KEY", "PUBLIC_URL", "OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"},
 		},
 		{
 			name:    "bad session key",
-			vars:    map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": "c2hvcnQ=", "LDAP_URL": "ldap://x", "LDAP_USER_BASE_DN": "dc=x"},
+			vars:    map[string]string{"AUTH_METHODS": "ldap", "SESSION_KEY": "c2hvcnQ=", "LDAP_URL": "ldaps://x", "LDAP_USER_BASE_DN": "dc=x"},
 			wantErr: []string{"SESSION_KEY must be 32"},
 		},
 		{
 			name:    "bad ldap settings",
-			vars:    map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": testKey, "LDAP_URL": "http://x", "LDAP_USER_BASE_DN": "dc=x", "LDAP_USER_FILTER": "(uid=fixed)"},
+			vars:    with(map[string]string{"AUTH_METHODS": "ldap", "LDAP_URL": "http://x", "LDAP_USER_BASE_DN": "dc=x", "LDAP_USER_FILTER": "(uid=fixed)"}),
 			wantErr: []string{"LDAP_URL must start", "LDAP_USER_FILTER must contain"},
 		},
 		{
-			name: "oidc",
-			vars: map[string]string{
-				"AUTH_TYPE": "OIDC", "SESSION_KEY": testKey, "PUBLIC_URL": "https://rw.example.com/",
-				"OIDC_ISSUER_URL": "https://idp", "OIDC_CLIENT_ID": "rw", "OIDC_CLIENT_SECRET": "s",
-				"OIDC_SCOPES": "groups openid", "ADMIN_GROUPS": "admins, ops", "SESSION_TTL": "1h",
-			},
+			name: "several methods, in order",
+			vars: with(gitlab, oidc, ldap, map[string]string{"AUTH_METHODS": " GitLab, ldap ,oidc", "OIDC_SCOPES": "groups openid",
+				"ADMIN_GROUPS": "admins, ops", "SESSION_TTL": "1h", "GITLAB_REQUIRED_GROUP": "/company/runwarden/", "OIDC_LABEL": "Keycloak"}),
 			check: func(t *testing.T, a Auth) {
-				if a.Type != AuthOIDC || a.PublicURL != "https://rw.example.com" || !a.CookieSecure || len(a.SessionKey) != 32 ||
-					a.SessionTTL != time.Hour || !slices.Equal(a.AdminGroups, []string{"admins", "ops"}) ||
-					!slices.Equal(a.OIDC.Scopes, []string{"openid", "profile", "email", "groups"}) ||
-					a.OIDC.UsernameClaim != "preferred_username" || !slices.Equal(a.OIDC.GroupsClaims, []string{"groups"}) {
+				if !slices.Equal(a.Methods, []string{"gitlab", "ldap", "oidc"}) || a.NoAuth || a.InitialAdmin ||
+					a.PublicURL != "https://rw.example.com" || !a.CookieSecure || len(a.SessionKey) != 32 || a.SessionTTL != time.Hour ||
+					!slices.Equal(a.AdminGroups, []string{"admins", "ops"}) || len(a.Warnings) != 0 {
 					t.Errorf("auth = %+v", a)
 				}
-			},
-		},
-		{
-			name: "gitlab over http",
-			vars: map[string]string{
-				"AUTH_TYPE": "gitlab", "SESSION_KEY": testKey, "PUBLIC_URL": "http://localhost:8080",
-				"GITLAB_URL": "https://gitlab.example.com/", "GITLAB_CLIENT_ID": "rw", "GITLAB_CLIENT_SECRET": "s",
-			},
-			check: func(t *testing.T, a Auth) {
-				if a.CookieSecure || a.OIDC.IssuerURL != "https://gitlab.example.com" || a.OIDC.UsernameClaim != "nickname" ||
-					!slices.Equal(a.OIDC.GroupsClaims, []string{"groups", "groups_direct"}) {
-					t.Errorf("auth = %+v", a)
+				if !slices.Equal(a.OIDC.Scopes, []string{"openid", "profile", "email", "groups"}) || a.OIDC.UsernameClaim != "preferred_username" ||
+					!slices.Equal(a.OIDC.GroupsClaims, []string{"groups"}) || a.OIDC.Label != "Keycloak" || a.OIDC.RequiredGroup != "" {
+					t.Errorf("oidc = %+v", a.OIDC)
 				}
-			},
-		},
-		{
-			name: "ldap defaults",
-			vars: map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": testKey, "LDAP_URL": "ldaps://dir", "LDAP_USER_BASE_DN": "ou=people,dc=x"},
-			check: func(t *testing.T, a Auth) {
-				if a.LDAP.UserFilter != "(uid={username})" || a.LDAP.GroupFilter != "(member={dn})" || a.LDAP.GroupNameAttr != "cn" {
+				if a.GitLab.IssuerURL != "https://gitlab.example.com" || a.GitLab.UsernameClaim != "nickname" || a.GitLab.Label != "GitLab" ||
+					!slices.Equal(a.GitLab.GroupsClaims, []string{"groups", "groups_direct"}) || a.GitLab.RequiredGroup != "company/runwarden" {
+					t.Errorf("gitlab = %+v", a.GitLab)
+				}
+				if a.LDAP.UserFilter != "(uid={username})" || a.LDAP.GroupFilter != "(member={dn})" || a.LDAP.GroupNameAttr != "cn" || a.LDAP.Label != "Directory" {
 					t.Errorf("ldap = %+v", a.LDAP)
+				}
+			},
+		},
+		{
+			name: "deprecated AUTH_TYPE over http",
+			vars: with(gitlab, map[string]string{"AUTH_TYPE": "gitlab", "PUBLIC_URL": "http://localhost:8080"}),
+			check: func(t *testing.T, a Auth) {
+				if !slices.Equal(a.Methods, []string{"gitlab"}) || a.CookieSecure || len(a.Warnings) != 1 {
+					t.Errorf("auth = %+v", a)
+				}
+			},
+		},
+		{
+			name: "built-in admin only (no PUBLIC_URL needed)",
+			vars: map[string]string{"INITIAL_ADMIN": "true", "SESSION_KEY": testKey},
+			check: func(t *testing.T, a Auth) {
+				if len(a.Methods) != 0 || !a.InitialAdmin {
+					t.Errorf("auth = %+v", a)
+				}
+			},
+		},
+		{
+			name: "none",
+			vars: map[string]string{"AUTH_METHODS": "none", "ALLOW_NO_AUTH": "true"},
+			check: func(t *testing.T, a Auth) {
+				if !a.NoAuth || len(a.Methods) != 0 {
+					t.Errorf("auth = %+v", a)
 				}
 			},
 		},
@@ -259,7 +286,7 @@ func TestConfigTraps(t *testing.T) {
 	if _, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none"})); err == nil || !strings.Contains(err.Error(), "ALLOW_NO_AUTH") {
 		t.Errorf("AUTH_TYPE=none without ALLOW_NO_AUTH: %v", err)
 	}
-	ldap := map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": testKey, "LDAP_URL": "ldap://dir", "LDAP_USER_BASE_DN": "dc=x"}
+	ldap := map[string]string{"AUTH_METHODS": "ldap", "SESSION_KEY": testKey, "LDAP_URL": "ldap://dir", "LDAP_USER_BASE_DN": "dc=x"}
 	if _, err := LoadApp(env(ldap)); err == nil || !strings.Contains(err.Error(), "clear text") {
 		t.Errorf("plain ldap:// accepted: %v", err)
 	}

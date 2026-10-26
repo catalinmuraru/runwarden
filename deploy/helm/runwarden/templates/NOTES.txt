@@ -8,10 +8,16 @@ Try it with:
   open http://localhost:8080
 {{- end }}
 
-{{- if eq .Values.auth.type "none" }}
+{{- if has "none" (.Values.auth.methods | default list) }}
 
-WARNING: auth.type=none — there is no sign-in and every visitor is an admin.
+WARNING: auth.methods [none] — there is no sign-in and every visitor is an admin.
 Use this only for local testing.
+{{- end }}
+{{- if .Values.auth.initialAdmin }}
+
+The built-in administrator "admin@local" is enabled. Its password (new at every start):
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "runwarden.fullname" . }} -- cat /var/lib/runwarden/initial-admin-password
+Set auth.initialAdmin=false once devops users can sign in.
 {{- end }}
 {{- if not .Values.persistence.enabled }}
 

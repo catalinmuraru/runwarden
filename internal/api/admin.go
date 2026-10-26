@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/activity"
+	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/auth"
 )
 
@@ -36,9 +38,17 @@ func (s *Server) trackActivity(next http.HandlerFunc) http.HandlerFunc {
 
 type adminUser struct {
 	activity.User
-	Runs    int  `json:"runs"`
-	Running int  `json:"running"`
-	Admin   bool `json:"admin"`
+	Runs     int      `json:"runs"`
+	Running  int      `json:"running"`
+	Admin    bool     `json:"admin"`
+	Sessions int      `json:"sessions"`          // valid sign-in sessions
+	Methods  []string `json:"methods,omitempty"` // how those sessions signed in
+}
+
+// SessionAdmin lists and revokes sign-in sessions (implemented by auth.Store).
+type SessionAdmin interface {
+	Summary() map[string]auth.SessionSummary
+	RevokeUser(name string) int
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, _ *http.Request) {
@@ -54,12 +64,34 @@ func (s *Server) adminUsers(w http.ResponseWriter, _ *http.Request) {
 			running[strings.ToLower(m.User)]++
 		}
 	}
-	users := s.opts.Activity.Users(time.Now())
+	now := time.Now()
+	var sessions map[string]auth.SessionSummary
+	if s.opts.Sessions != nil {
+		sessions = s.opts.Sessions.Summary()
+	}
+	users := s.opts.Activity.Users(now)
 	out := make([]adminUser, 0, len(users))
 	for _, u := range users {
 		key := strings.ToLower(u.Name)
 		au := adminUser{User: u, Runs: counts[key], Running: running[key]}
 		au.Admin = s.opts.Policy.IsAdmin(authUser(u))
+		if sessions != nil {
+			// Real sessions are known: they decide whether the user is signed in.
+			sum := sessions[key]
+			au.Sessions, au.Methods = sum.Count, sum.Methods
+			seen := u.LastSeen
+			if sum.LastSeen.After(seen) {
+				seen = sum.LastSeen
+			}
+			switch {
+			case sum.Count == 0:
+				au.Status = activity.StatusSignedOut
+			case now.Sub(seen) <= activity.ActiveWindow:
+				au.Status = activity.StatusActive
+			default:
+				au.Status = activity.StatusSignedIn
+			}
+		}
 		out = append(out, au)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": out, "active_window_seconds": int(activity.ActiveWindow.Seconds())})
@@ -88,4 +120,25 @@ func (s *Server) adminActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
 
-func authUser(u activity.User) auth.User { return auth.User{Name: u.Name, Groups: u.Groups} }
+// authUser rebuilds enough of a user for authorization checks in listings.
+func authUser(u activity.User) auth.User {
+	au := auth.User{Name: u.Name, Groups: u.Groups}
+	if u.Name == auth.LocalAdminName {
+		au.Method = auth.MethodLocal // the name is reserved for the built-in administrator
+	}
+	return au
+}
+
+// adminSignOut ends every session of a user ("sign out everywhere").
+func (s *Server) adminSignOut(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Sessions == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	name := r.PathValue("name")
+	n := s.opts.Sessions.RevokeUser(name)
+	s.record(r, audit.Event{Action: audit.SessionRevoke, Category: "authentication", Type: "end", Success: true,
+		Count: n, Reason: "signed out by an administrator: " + name,
+		Message: fmt.Sprintf("%d sessions of %s revoked", n, name)})
+	writeJSON(w, http.StatusOK, map[string]int{"revoked": n})
+}

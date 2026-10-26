@@ -47,7 +47,7 @@ const (
 	RunHomeShared = "shared"
 )
 
-// Auth types.
+// Sign-in methods.
 const (
 	AuthOIDC   = "oidc"
 	AuthGitLab = "gitlab"
@@ -55,9 +55,13 @@ const (
 	AuthNone   = "none"
 )
 
-// Auth configures login and sessions.
+// Auth configures sign-in and sessions.
 type Auth struct {
-	Type         string        // AUTH_TYPE: oidc, gitlab, ldap or none (required)
+	// Methods offered on the sign-in page, in order (AUTH_METHODS: gitlab, oidc, ldap). Empty
+	// is allowed only with InitialAdmin.
+	Methods      []string
+	NoAuth       bool          // AUTH_METHODS=none (+ ALLOW_NO_AUTH=true): no sign-in, everyone is an admin
+	InitialAdmin bool          // INITIAL_ADMIN: built-in administrator with a generated password
 	PublicURL    string        // PUBLIC_URL, e.g. https://runwarden.example.com
 	SessionKey   []byte        // SESSION_KEY: 32 bytes, base64
 	SessionTTL   time.Duration // SESSION_TTL, default 12h
@@ -68,10 +72,16 @@ type Auth struct {
 	AdminUsers        []string // ADMIN_USERS
 	AdminGroups       []string // ADMIN_GROUPS
 	OIDC              OIDC
+	GitLab            OIDC
 	LDAP              LDAP
+	// Warnings are problems that do not stop the server (e.g. deprecated settings).
+	Warnings []string
 }
 
-// OIDC configures OpenID Connect login (also used for GitLab).
+// Enabled reports whether method is offered.
+func (a Auth) Enabled(method string) bool { return slices.Contains(a.Methods, method) }
+
+// OIDC configures OpenID Connect sign-in (also used for GitLab).
 type OIDC struct {
 	IssuerURL     string
 	ClientID      string
@@ -79,9 +89,11 @@ type OIDC struct {
 	Scopes        []string
 	UsernameClaim string
 	GroupsClaims  []string // tried in order; the first one present wins
+	Label         string   // shown on the sign-in page
+	RequiredGroup string   // only members of this group (or its subgroups) may sign in
 }
 
-// LDAP configures LDAP login.
+// LDAP configures LDAP sign-in.
 type LDAP struct {
 	URL            string
 	StartTLS       bool
@@ -93,6 +105,7 @@ type LDAP struct {
 	GroupFilter    string // {dn} and {username} are replaced, escaped
 	GroupNameAttr  string
 	UserGroupsAttr string // read groups from this user attribute (e.g. memberOf) instead of searching
+	Label          string // shown on the sign-in page
 }
 
 // LoadApp reads the configuration through getenv (usually os.Getenv). All problems are
@@ -214,38 +227,65 @@ func LoadApp(getenv func(string) string) (App, error) {
 
 func loadAuth(getenv func(string) string, str func(string, string) string, dur func(string, time.Duration) time.Duration, errs *[]error) Auth {
 	fail := func(format string, args ...any) { *errs = append(*errs, fmt.Errorf(format, args...)) }
-	require := func(name string) string {
+	flag := func(name string) bool {
+		raw := str(name, "")
+		if raw == "" {
+			return false
+		}
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			fail("%s: invalid value %q", name, raw)
+		}
+		return v
+	}
+	a := Auth{
+		PublicURL:    strings.TrimRight(str("PUBLIC_URL", ""), "/"),
+		SessionTTL:   dur("SESSION_TTL", 12*time.Hour),
+		AdminUsers:   list(getenv("ADMIN_USERS")),
+		AdminGroups:  list(getenv("ADMIN_GROUPS")),
+		InitialAdmin: flag("INITIAL_ADMIN"),
+	}
+	require := func(name, method string) string {
 		v := str(name, "")
 		if v == "" {
-			fail("%s is required when AUTH_TYPE=%s", name, str("AUTH_TYPE", ""))
+			fail("%s is required for the %s sign-in method", name, method)
 		}
 		return v
 	}
 
-	a := Auth{
-		Type:        strings.ToLower(str("AUTH_TYPE", "")),
-		PublicURL:   strings.TrimRight(str("PUBLIC_URL", ""), "/"),
-		SessionTTL:  dur("SESSION_TTL", 12*time.Hour),
-		AdminUsers:  list(getenv("ADMIN_USERS")),
-		AdminGroups: list(getenv("ADMIN_GROUPS")),
+	raw := strings.ToLower(str("AUTH_METHODS", ""))
+	if raw == "" && str("AUTH_TYPE", "") != "" {
+		raw = strings.ToLower(str("AUTH_TYPE", ""))
+		a.Warnings = append(a.Warnings, "AUTH_TYPE is deprecated; use AUTH_METHODS (a comma-separated list)")
 	}
-	switch a.Type {
-	case AuthOIDC, AuthGitLab, AuthLDAP, AuthNone:
-	case "":
-		fail("AUTH_TYPE is required: oidc, gitlab, ldap, or none (local development only)")
-		return a
-	default:
-		fail("AUTH_TYPE: unknown value %q (want oidc, gitlab, ldap or none)", a.Type)
-		return a
-	}
-	if a.Type == AuthNone {
-		if v, _ := strconv.ParseBool(str("ALLOW_NO_AUTH", "")); !v {
-			fail("AUTH_TYPE=none makes every visitor an admin; set ALLOW_NO_AUTH=true as well to confirm (local development only)")
+	for _, m := range list(raw) {
+		switch {
+		case m != AuthGitLab && m != AuthOIDC && m != AuthLDAP && m != AuthNone:
+			fail("AUTH_METHODS: unknown method %q (want gitlab, oidc, ldap, or none)", m)
+		case slices.Contains(a.Methods, m):
+			fail("AUTH_METHODS: %q is listed twice", m)
+		default:
+			a.Methods = append(a.Methods, m)
 		}
+	}
+	if slices.Contains(a.Methods, AuthNone) {
+		if len(a.Methods) > 1 || a.InitialAdmin {
+			fail("AUTH_METHODS=none cannot be combined with other methods or INITIAL_ADMIN")
+		}
+		if v, _ := strconv.ParseBool(str("ALLOW_NO_AUTH", "")); !v {
+			fail("AUTH_METHODS=none makes every visitor an admin; set ALLOW_NO_AUTH=true as well to confirm (local development only)")
+		}
+		a.Methods, a.NoAuth = nil, true
+		return a
+	}
+	if len(a.Methods) == 0 && !a.InitialAdmin {
+		fail("AUTH_METHODS is required: gitlab, oidc, ldap (comma-separated), or none for local development")
 		return a
 	}
 
-	if raw := require("SESSION_KEY"); raw != "" {
+	if raw := str("SESSION_KEY", ""); raw == "" {
+		fail("SESSION_KEY is required (32 random bytes, base64: openssl rand -base64 32)")
+	} else {
 		key, err := decodeKey(raw)
 		if err != nil || len(key) != 32 {
 			fail("SESSION_KEY must be 32 random bytes, base64 encoded (e.g. openssl rand -base64 32)")
@@ -261,60 +301,59 @@ func loadAuth(getenv func(string) string, str func(string, string) string, dur f
 		a.CookieSecure = v
 	}
 
-	switch a.Type {
-	case AuthOIDC, AuthGitLab:
-		if u, err := url.Parse(require("PUBLIC_URL")); a.PublicURL != "" && (err != nil || u.Scheme == "" || u.Host == "") {
-			fail("PUBLIC_URL must be an absolute URL such as https://runwarden.example.com")
+	if a.Enabled(AuthGitLab) || a.Enabled(AuthOIDC) {
+		if u, err := url.Parse(str("PUBLIC_URL", "")); err != nil || u.Scheme == "" || u.Host == "" {
+			fail("PUBLIC_URL must be an absolute URL such as https://runwarden.example.com (needed by gitlab and oidc sign-in)")
 		}
-		scopes := []string{"openid", "profile", "email"}
-		for _, s := range strings.Fields(str("OIDC_SCOPES", "")) {
-			if !slices.Contains(scopes, s) {
-				scopes = append(scopes, s)
-			}
+	}
+	scopes := []string{"openid", "profile", "email"}
+	for _, s := range strings.Fields(str("OIDC_SCOPES", "")) {
+		if !slices.Contains(scopes, s) {
+			scopes = append(scopes, s)
 		}
-		if a.Type == AuthOIDC {
-			a.OIDC = OIDC{
-				IssuerURL:     require("OIDC_ISSUER_URL"),
-				ClientID:      require("OIDC_CLIENT_ID"),
-				ClientSecret:  require("OIDC_CLIENT_SECRET"),
-				Scopes:        scopes,
-				UsernameClaim: str("OIDC_USERNAME_CLAIM", "preferred_username"),
-				GroupsClaims:  []string{str("OIDC_GROUPS_CLAIM", "groups")},
-			}
-		} else {
-			a.OIDC = OIDC{
-				IssuerURL:     strings.TrimRight(str("GITLAB_URL", "https://gitlab.com"), "/"),
-				ClientID:      require("GITLAB_CLIENT_ID"),
-				ClientSecret:  require("GITLAB_CLIENT_SECRET"),
-				Scopes:        scopes,
-				UsernameClaim: "nickname",
-				GroupsClaims:  []string{"groups", "groups_direct"},
-			}
+	}
+	if a.Enabled(AuthOIDC) {
+		a.OIDC = OIDC{
+			IssuerURL:     require("OIDC_ISSUER_URL", AuthOIDC),
+			ClientID:      require("OIDC_CLIENT_ID", AuthOIDC),
+			ClientSecret:  require("OIDC_CLIENT_SECRET", AuthOIDC),
+			Scopes:        scopes,
+			UsernameClaim: str("OIDC_USERNAME_CLAIM", "preferred_username"),
+			GroupsClaims:  []string{str("OIDC_GROUPS_CLAIM", "groups")},
+			Label:         str("OIDC_LABEL", "Single sign-on"),
+			RequiredGroup: strings.Trim(str("OIDC_REQUIRED_GROUP", ""), "/"),
 		}
-	case AuthLDAP:
+	}
+	if a.Enabled(AuthGitLab) {
+		a.GitLab = OIDC{
+			IssuerURL:     strings.TrimRight(str("GITLAB_URL", "https://gitlab.com"), "/"),
+			ClientID:      require("GITLAB_CLIENT_ID", AuthGitLab),
+			ClientSecret:  require("GITLAB_CLIENT_SECRET", AuthGitLab),
+			Scopes:        []string{"openid", "profile", "email"},
+			UsernameClaim: "nickname",
+			GroupsClaims:  []string{"groups", "groups_direct"},
+			Label:         str("GITLAB_LABEL", "GitLab"),
+			RequiredGroup: strings.Trim(str("GITLAB_REQUIRED_GROUP", ""), "/"),
+		}
+	}
+	if a.Enabled(AuthLDAP) {
 		a.LDAP = LDAP{
-			URL:            require("LDAP_URL"),
+			URL:            require("LDAP_URL", AuthLDAP),
 			BindDN:         str("LDAP_BIND_DN", ""),
 			BindPassword:   getenv("LDAP_BIND_PASSWORD"),
-			UserBaseDN:     require("LDAP_USER_BASE_DN"),
+			UserBaseDN:     require("LDAP_USER_BASE_DN", AuthLDAP),
 			UserFilter:     str("LDAP_USER_FILTER", "(uid={username})"),
 			GroupBaseDN:    str("LDAP_GROUP_BASE_DN", ""),
 			GroupFilter:    str("LDAP_GROUP_FILTER", "(member={dn})"),
 			GroupNameAttr:  str("LDAP_GROUP_NAME_ATTR", "cn"),
 			UserGroupsAttr: str("LDAP_USER_GROUPS_ATTR", ""),
-		}
-		if raw := str("LDAP_START_TLS", ""); raw != "" {
-			v, err := strconv.ParseBool(raw)
-			if err != nil {
-				fail("LDAP_START_TLS: invalid value %q", raw)
-			}
-			a.LDAP.StartTLS = v
+			Label:          str("LDAP_LABEL", "Directory"),
+			StartTLS:       flag("LDAP_START_TLS"),
 		}
 		if !strings.HasPrefix(a.LDAP.URL, "ldap://") && !strings.HasPrefix(a.LDAP.URL, "ldaps://") && a.LDAP.URL != "" {
 			fail("LDAP_URL must start with ldap:// or ldaps://")
 		}
-		insecure, _ := strconv.ParseBool(str("LDAP_INSECURE", ""))
-		if strings.HasPrefix(a.LDAP.URL, "ldap://") && !a.LDAP.StartTLS && !insecure {
+		if strings.HasPrefix(a.LDAP.URL, "ldap://") && !a.LDAP.StartTLS && !flag("LDAP_INSECURE") {
 			fail("LDAP_URL uses ldap:// without LDAP_START_TLS=true, so passwords would cross the network in clear text; use ldaps://, set LDAP_START_TLS=true, or LDAP_INSECURE=true for local testing")
 		}
 		if !strings.Contains(a.LDAP.UserFilter, "{username}") {
