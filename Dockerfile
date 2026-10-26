@@ -46,8 +46,9 @@ ENV RUNNERS_DIR=/etc/runwarden/runners \
     BASE_DIR=/opt/runwarden \
     DATA_DIR=/var/lib/runwarden \
     LISTEN_ADDR=:8080 \
+    HEALTH_ADDR=:8081 \
     HOME=/home/runwarden
 WORKDIR /opt/runwarden
 USER 10001:10001
-EXPOSE 8080
+EXPOSE 8080 8081
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/runwarden"]

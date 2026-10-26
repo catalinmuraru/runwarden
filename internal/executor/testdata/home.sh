@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+echo "home=$HOME"
+echo "kubeconfig=$KUBECONFIG"
+echo "azure=$AZURE_CONFIG_DIR"
+echo "tmp=$TMPDIR"
+cat "$HOME/.gitconfig" 2>/dev/null || echo "no skeleton"
+test -e "$HOME/outside" && echo "symlink followed outside"
+mkdir -p "$(dirname "$KUBECONFIG")" && echo "context: $1" > "$KUBECONFIG"
+sleep "${2:-0}"
+echo "kube=$(cat "$KUBECONFIG")"

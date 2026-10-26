@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/activity"
 	"github.com/catalinmuraru/runwarden/internal/audit"
@@ -31,6 +32,11 @@ type Options struct {
 	Policy       authz.Policy
 	// Activity, if set, records who uses the server and serves the admin pages.
 	Activity *activity.Store
+	// Helper scripts (dropdown values, defaults): concurrent calls per user and in total
+	// (defaults 2 and 10), and how long their output is reused (0: not cached).
+	ValuesMaxPerUser int
+	ValuesMaxGlobal  int
+	ValuesCacheTTL   time.Duration
 }
 
 // Server serves the API.
@@ -38,6 +44,7 @@ type Server struct {
 	opts    Options
 	exec    *executor.Executor
 	hist    *history.Store
+	helpers *helpers
 	catalog atomic.Pointer[config.Catalog]
 }
 
@@ -46,7 +53,7 @@ func New(opts Options, ex *executor.Executor, hist *history.Store) *Server {
 	if opts.MaxUploadBytes <= 0 {
 		opts.MaxUploadBytes = 100 << 20
 	}
-	return &Server{opts: opts, exec: ex, hist: hist}
+	return &Server{opts: opts, exec: ex, hist: hist, helpers: newHelpers(opts.ValuesMaxPerUser, opts.ValuesMaxGlobal, opts.ValuesCacheTTL)}
 }
 
 // SetCatalog replaces the scripts served, e.g. after a config reload.

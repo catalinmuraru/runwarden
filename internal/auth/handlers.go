@@ -33,12 +33,19 @@ type Options struct {
 	// RelevantGroups lists the groups that matter for authorization. When a user has too many
 	// groups for the session cookie, only these are kept.
 	RelevantGroups func() []string
+	// Failed sign-ins allowed per client address (15 minutes) and in total (1 minute), on top of
+	// the per user+address limit. Zero means no limit.
+	MaxFailuresPerIP  int
+	MaxFailuresGlobal int
 }
 
 // Handler serves login, callback, logout and /api/me, and authenticates API requests.
 type Handler struct {
-	opts  Options
-	limit *limiter
+	opts   Options
+	limit  *limiter // failures per user name + client address
+	perIP  *limiter // failures per client address
+	global *limiter // failures from everywhere
+	noted  *limiter // refusals already audited, per client address
 }
 
 // New returns a Handler.
@@ -46,7 +53,13 @@ func New(opts Options) *Handler {
 	if opts.IsAdmin == nil {
 		opts.IsAdmin = func(User) bool { return false }
 	}
-	return &Handler{opts: opts, limit: newLimiter(5, 15*time.Minute)}
+	return &Handler{
+		opts:   opts,
+		limit:  newLimiter(5, 15*time.Minute),
+		perIP:  newLimiter(opts.MaxFailuresPerIP, 15*time.Minute),
+		global: newLimiter(opts.MaxFailuresGlobal, time.Minute),
+		noted:  newLimiter(1, 15*time.Minute),
+	}
 }
 
 // Register adds the auth routes to mux.
@@ -135,6 +148,10 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if h.throttled(r, User{}) {
+		http.Error(w, "Too many failed sign-ins, try again later.", http.StatusTooManyRequests)
+		return
+	}
 	st, ok := h.opts.Sessions.takeLogin(w, r)
 	if !ok {
 		http.Error(w, "Sign-in expired or was started in another browser. Please sign in again.", http.StatusBadRequest)
@@ -143,11 +160,13 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if e := q.Get("error"); e != "" {
 		slog.Warn("auth: provider refused sign-in", "error", e, "description", q.Get("error_description"))
+		h.failed(r)
 		h.auditLogin(r, User{}, false, "refused by the identity provider: "+e)
 		http.Error(w, "Sign-in was cancelled or refused by the identity provider.", http.StatusUnauthorized)
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(st.State)) != 1 {
+		h.failed(r)
 		h.auditLogin(r, User{}, false, "state mismatch")
 		http.Error(w, "Sign-in state mismatch. Please sign in again.", http.StatusBadRequest)
 		return
@@ -155,6 +174,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	u, err := h.opts.Redirect.Exchange(r.Context(), q.Get("code"), st.Verifier, st.Nonce)
 	if err != nil {
 		slog.Warn("auth: sign-in failed", "err", err)
+		h.failed(r)
 		h.auditLogin(r, User{}, false, "sign-in with the identity provider failed")
 		http.Error(w, "Sign-in failed.", http.StatusUnauthorized)
 		return
@@ -183,9 +203,16 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"username\": ..., \"password\": ...}"})
 		return
 	}
-	key := strings.ToLower(strings.TrimSpace(c.Username)) + "|" + h.opts.ClientIP.IP(r)
+	ip := h.opts.ClientIP.IP(r)
+	key := strings.ToLower(strings.TrimSpace(c.Username)) + "|" + ip
 	if !h.limit.allowed(key) {
-		h.auditLogin(r, User{Name: c.Username}, false, "too many failed sign-ins")
+		if h.noted.first(key) {
+			h.auditLogin(r, User{Name: c.Username}, false, "too many failed sign-ins")
+		}
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed sign-ins, try again later"})
+		return
+	}
+	if h.throttled(r, User{Name: c.Username}) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed sign-ins, try again later"})
 		return
 	}
@@ -193,6 +220,7 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, ErrInvalidCredentials):
 		h.limit.fail(key)
+		h.failed(r)
 		h.auditLogin(r, User{Name: c.Username}, false, "invalid user name or password")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": ErrInvalidCredentials.Error()})
 		return
@@ -260,6 +288,25 @@ func (h *Handler) meBody(u User) meResponse {
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	u, _ := UserFrom(r.Context())
 	writeJSON(w, http.StatusOK, h.meBody(u))
+}
+
+// failed counts a failed sign-in against the per-address and global limits.
+func (h *Handler) failed(r *http.Request) {
+	h.perIP.fail(h.opts.ClientIP.IP(r))
+	h.global.fail("")
+}
+
+// throttled reports whether sign-ins are refused for this address or for everyone. Only the
+// first refusal per address and window is audited, so a flood cannot fill the logs.
+func (h *Handler) throttled(r *http.Request, u User) bool {
+	ip := h.opts.ClientIP.IP(r)
+	if h.perIP.allowed(ip) && h.global.allowed("") {
+		return false
+	}
+	if h.noted.first(ip) {
+		h.auditLogin(r, u, false, "too many failed sign-ins; further refusals from this address are not logged for 15 minutes")
+	}
+	return true
 }
 
 // auditLogin records a sign-in attempt. Passwords are never passed here.

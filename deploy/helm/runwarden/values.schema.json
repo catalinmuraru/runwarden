@@ -15,6 +15,9 @@
       "type": "object",
       "properties": {
         "type": { "enum": ["", "oidc", "gitlab", "ldap", "none"] },
+        "allowNoAuth": { "type": "boolean" },
+        "maxFailuresPerIP": { "type": "integer", "minimum": 0 },
+        "maxFailuresGlobal": { "type": "integer", "minimum": 0 },
         "publicUrl": { "type": "string" },
         "cookieSecure": { "type": ["boolean", "null"] },
         "adminUsers": { "type": "array", "items": { "type": "string" } },
@@ -24,6 +27,39 @@
     "existingSecret": { "type": "string" },
     "allowedOrigins": { "type": "array", "items": { "type": "string" } },
     "trustedProxies": { "type": "array", "items": { "type": "string" } },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxConcurrentRuns": { "type": "integer", "minimum": 1 },
+        "maxRunsPerUser": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "runs": {
+      "type": "object",
+      "properties": {
+        "home": { "enum": ["per-run", "shared"] },
+        "homeSkeletonConfigMap": { "type": "string" }
+      }
+    },
+    "valueScripts": {
+      "type": "object",
+      "properties": {
+        "maxPerUser": { "type": "integer", "minimum": 1 },
+        "maxGlobal": { "type": "integer", "minimum": 1 },
+        "cacheTTL": { "type": ["string", "integer"] }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingressFrom": { "type": "array" },
+        "egress": {
+          "type": "object",
+          "properties": { "dns": { "type": "boolean" }, "rules": { "type": "array" } }
+        }
+      }
+    },
     "history": {
       "type": "object",
       "properties": {

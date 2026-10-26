@@ -12,6 +12,12 @@ imagePullSecrets: []
 auth:
   # Required: oidc, gitlab, ldap, or none (local development only: no sign-in).
   type: ""
+  # Must also be true for type none: everyone who can reach the server becomes an admin.
+  allowNoAuth: false
+  # Failed sign-ins allowed per client address (15 minutes) and in total (1 minute) before
+  # further attempts are refused, besides 5 per user name and address. 0 = no limit.
+  maxFailuresPerIP: 20
+  maxFailuresGlobal: 100
   # External URL, e.g. https://runwarden.example.com (required for oidc and gitlab).
   publicUrl: ""
   sessionTTL: 12h
@@ -32,6 +38,8 @@ auth:
   ldap:
     url: ""
     startTLS: false
+    # Allow ldap:// without StartTLS (passwords in clear text): local testing only.
+    insecure: false
     bindDN: ""
     userBaseDN: ""
     userFilter: ""
@@ -52,8 +60,31 @@ limits:
   runTimeout: 60m
   runTimeoutMax: 24h
   killGrace: 10s
+  # Runs one user may have in progress at the same time (0 = no limit), admins included.
+  maxRunsPerUser: 1
   maxOutputBytes: 10Mi
   maxUploadBytes: 100Mi
+
+runs:
+  # per-run: every run gets its own HOME (with KUBECONFIG and AZURE_CONFIG_DIR inside it), so
+  # kube contexts, az logins and git credentials of one run never reach another. Scripts log in
+  # per run. shared: the old behaviour, one HOME for all runs (for scripts not migrated yet).
+  home: per-run
+  # ConfigMap copied into every per-run HOME (e.g. key ".gitconfig"; use items/path for
+  # ".ssh/known_hosts"). Empty: start with an empty HOME.
+  homeSkeletonConfigMap: ""
+
+# Helper scripts that fill dropdowns and defaults: concurrent calls per user and in total, and
+# how long their output is reused ("0" = not cached).
+valueScripts:
+  maxPerUser: 2
+  maxGlobal: 10
+  cacheTTL: 60s
+
+# In-app activity log (Admin page): failed sign-ins stop being recorded there once a day's
+# file reaches this size. The application log (stdout) keeps everything.
+activity:
+  maxDayBytes: 50Mi
 
 # Extra hosts allowed to open WebSockets (the server's own host always is).
 allowedOrigins: []
@@ -94,6 +125,23 @@ persistence:
   existingClaim: ""
   # Keep the claim (and the history) when the release is uninstalled.
   keepOnUninstall: true
+
+# Restrict the pod's network traffic. Plain NetworkPolicy matches IP ranges only: to allow
+# external hosts by name (GitLab, Azure) use your CNI's FQDN policies or an egress proxy.
+networkPolicy:
+  enabled: false
+  # Peers allowed to reach the web port, e.g. the ingress controller's namespace:
+  #   - namespaceSelector:
+  #       matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+  # Empty: any peer. The health port is always open (kubelet probes).
+  ingressFrom: []
+  egress:
+    # Allow DNS to kube-dns in kube-system.
+    dns: true
+    # Extra NetworkPolicyEgressRule entries, e.g. GitLab, Azure or the API server:
+    #   - to: [{ipBlock: {cidr: 10.20.0.0/16}}]
+    #     ports: [{port: 443, protocol: TCP}]
+    rules: []
 
 extraEnv: []
 extraEnvFrom: []

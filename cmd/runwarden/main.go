@@ -64,6 +64,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("activity: %w", err)
 	}
+	acts.MaxDayBytes = cfg.ActivityMaxDay
 	audit.SetSink(acts.Add)
 	defer func() {
 		if err := acts.Flush(); err != nil {
@@ -85,7 +86,12 @@ func run() error {
 		Timeout:        cfg.RunTimeout,
 		KillGrace:      cfg.KillGrace,
 		MaxOutputBytes: cfg.MaxOutputBytes,
-	}, executor.EnvPolicy{TempRoot: tempRoot})
+		MaxPerUser:     cfg.MaxRunsPerUser,
+	}, executor.EnvPolicy{
+		TempRoot:     tempRoot,
+		PrivateHome:  cfg.RunHome == config.RunHomePerRun,
+		HomeSkeleton: cfg.HomeSkeleton,
+	})
 	policy := authz.Policy{
 		AdminUsers:  cfg.Auth.AdminUsers,
 		AdminGroups: cfg.Auth.AdminGroups,
@@ -108,6 +114,10 @@ func run() error {
 		Authenticate:   authH.Middleware,
 		Policy:         policy,
 		Activity:       acts,
+
+		ValuesMaxPerUser: cfg.ValuesMaxPerUser,
+		ValuesMaxGlobal:  cfg.ValuesMaxGlobal,
+		ValuesCacheTTL:   cfg.ValuesCacheTTL,
 	}, ex, hist)
 	apiSrv.SetCatalog(cat)
 	go reloadOnHangup(ctx, cfg, apiSrv)
@@ -119,11 +129,18 @@ func run() error {
 		Handler:           newMux(apiSrv, authH),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	errc := make(chan error, 1)
+	// Probes get their own listener, which the Service and ingress do not expose.
+	health := &http.Server{
+		Addr:              cfg.HealthAddr,
+		Handler:           newHealthMux(apiSrv),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	errc := make(chan error, 2)
 	go func() {
-		slog.Info("listening", "addr", cfg.ListenAddr, "runners", cfg.RunnersDir, "data", cfg.DataDir)
+		slog.Info("listening", "addr", cfg.ListenAddr, "health", cfg.HealthAddr, "runners", cfg.RunnersDir, "data", cfg.DataDir)
 		errc <- srv.ListenAndServe()
 	}()
+	go func() { errc <- health.ListenAndServe() }()
 
 	select {
 	case err := <-errc:
@@ -141,11 +158,14 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	_ = health.Shutdown(shutdownCtx)
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return err
 	}
-	if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
-		return err
+	for range 2 {
+		if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
 	}
 	return nil
 }
@@ -158,6 +178,9 @@ func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, clientIP 
 		ClientIP:       clientIP,
 		IsAdmin:        policy.IsAdmin,
 		RelevantGroups: relevantGroups,
+
+		MaxFailuresPerIP:  cfg.Auth.MaxFailuresPerIP,
+		MaxFailuresGlobal: cfg.Auth.MaxFailuresGlobal,
 	}
 	if cfg.Auth.Type == config.AuthNone {
 		slog.Warn("AUTH_TYPE=none: authentication is disabled and every visitor is an admin; use only for local development")
@@ -269,6 +292,18 @@ func flushActivity(ctx context.Context, acts *activity.Store) {
 func newMux(apiSrv *api.Server, authH *auth.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	authH.Register(mux)
+	// Probes live on HEALTH_ADDR only; here they are plain 404s rather than the UI's index page.
+	for _, p := range []string{"GET /healthz", "GET /readyz"} {
+		mux.HandleFunc(p, http.NotFound)
+	}
+	apiSrv.Register(mux)
+	mux.Handle("GET /", web.Handler())
+	return mux
+}
+
+// newHealthMux serves the liveness and readiness probes.
+func newHealthMux(apiSrv *api.Server) *http.ServeMux {
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if !apiSrv.Ready() {
@@ -277,8 +312,6 @@ func newMux(apiSrv *api.Server, authH *auth.Handler) *http.ServeMux {
 		}
 		ok(w, r)
 	})
-	apiSrv.Register(mux)
-	mux.Handle("GET /", web.Handler())
 	return mux
 }
 

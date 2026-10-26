@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -26,7 +27,15 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string) ([
 	ctx, cancel := context.WithTimeout(ctx, captureTimeout)
 	defer cancel()
 
-	env, _ := e.env.build(nil, nil)
+	// Helpers get a private TMPDIR and HOME too, removed afterwards.
+	dir0, vars, err := e.env.prepareRunDir(fmt.Sprintf("values-%d", e.helperSeq.Add(1)))
+	if err != nil {
+		return nil, err
+	}
+	if dir0 != "" {
+		defer func() { _ = os.RemoveAll(dir0) }()
+	}
+	env, _ := e.env.build(nil, vars)
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // argv from config, no shell
 	cmd.Dir = dir
 	cmd.Env = env
@@ -42,7 +51,7 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string) ([
 	stdout := &capped{max: captureMax}
 	stderr := &capped{max: 4 << 10}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if cmd.Process != nil {
 		killGroup(cmd.Process.Pid) // background children of the helper
 	}

@@ -126,3 +126,25 @@ func TestSeenThrottled(t *testing.T) {
 		t.Error("a new address must be recorded")
 	}
 }
+
+func TestDayCapDropsOnlyFailedSignIns(t *testing.T) {
+	s, _ := Open(t.TempDir(), time.Hour)
+	s.MaxDayBytes = 400
+	for i := range 20 {
+		s.Add(audit.Record{Time: t0.Add(time.Duration(i) * time.Second), User: "x", Action: audit.Login, Outcome: "failure", Reason: "invalid user name or password"})
+	}
+	s.Add(audit.Record{Time: t0.Add(time.Minute), User: "alice", Action: audit.RunStart, Outcome: "success", Script: "S"})
+	all, _ := s.Query(Filter{Limit: 100})
+	failed, markers := 0, 0
+	for _, r := range all {
+		switch {
+		case r.Reason != "":
+			failed++
+		case r.Action == audit.Login:
+			markers++
+		}
+	}
+	if failed >= 20 || failed == 0 || markers != 1 || all[0].Action != audit.RunStart {
+		t.Errorf("failed=%d markers=%d newest=%s", failed, markers, all[0].Action)
+	}
+}

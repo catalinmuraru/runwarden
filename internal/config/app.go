@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,8 +30,22 @@ type App struct {
 	TrustedProxies    []string      // TRUSTED_PROXIES, CIDRs whose X-Forwarded-For is believed
 	HistoryMaxAge     time.Duration // HISTORY_MAX_AGE, default 90d; 0 keeps runs forever
 	HistoryMaxRuns    int           // HISTORY_MAX_RUNS, default 0 (no limit)
+	HealthAddr        string        // HEALTH_ADDR, default ":8081"; /healthz and /readyz
+	MaxRunsPerUser    int           // MAX_RUNS_PER_USER, default 1; 0 means no per-user limit
+	RunHome           string        // RUN_HOME: "per-run" (default) or "shared"
+	HomeSkeleton      string        // HOME_SKELETON: directory copied into every per-run HOME
+	ValuesMaxPerUser  int           // VALUES_MAX_PER_USER, default 2; concurrent dropdown helpers per user
+	ValuesMaxGlobal   int           // VALUES_MAX_GLOBAL, default 10
+	ValuesCacheTTL    time.Duration // VALUES_CACHE_TTL, default 60s; 0 disables the cache
+	ActivityMaxDay    int64         // ACTIVITY_MAX_DAY_BYTES, default 50Mi; then failed sign-ins are not kept
 	Auth              Auth
 }
+
+// Per-run HOME modes.
+const (
+	RunHomePerRun = "per-run"
+	RunHomeShared = "shared"
+)
 
 // Auth types.
 const (
@@ -47,10 +62,13 @@ type Auth struct {
 	SessionKey   []byte        // SESSION_KEY: 32 bytes, base64
 	SessionTTL   time.Duration // SESSION_TTL, default 12h
 	CookieSecure bool          // COOKIE_SECURE, default true unless PUBLIC_URL is http
-	AdminUsers   []string      // ADMIN_USERS
-	AdminGroups  []string      // ADMIN_GROUPS
-	OIDC         OIDC
-	LDAP         LDAP
+	// Failed sign-ins allowed before more attempts are refused, besides the per user+address limit.
+	MaxFailuresPerIP  int      // LOGIN_MAX_FAILURES_PER_IP, default 20 per 15 minutes
+	MaxFailuresGlobal int      // LOGIN_MAX_FAILURES_GLOBAL, default 100 per minute
+	AdminUsers        []string // ADMIN_USERS
+	AdminGroups       []string // ADMIN_GROUPS
+	OIDC              OIDC
+	LDAP              LDAP
 }
 
 // OIDC configures OpenID Connect login (also used for GitLab).
@@ -147,7 +165,50 @@ func LoadApp(getenv func(string) string) (App, error) {
 		}
 		app.HistoryMaxRuns = n
 	}
+	for _, cidr := range app.TrustedProxies {
+		if err := checkProxyCIDR(cidr); err != nil {
+			errs = append(errs, fmt.Errorf("TRUSTED_PROXIES: %w", err))
+		}
+	}
+	// Settings where 0 is meaningful (disabled / unlimited).
+	count := func(name string, def int) int {
+		raw := str(name, "")
+		if raw == "" {
+			return def
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			errs = append(errs, fmt.Errorf("%s: invalid value %q", name, raw))
+			return def
+		}
+		return n
+	}
+	app.HealthAddr = str("HEALTH_ADDR", ":8081")
+	app.MaxRunsPerUser = count("MAX_RUNS_PER_USER", 1)
+	app.ValuesMaxPerUser = int(num("VALUES_MAX_PER_USER", 2, integer))
+	app.ValuesMaxGlobal = int(num("VALUES_MAX_GLOBAL", 10, integer))
+	app.ValuesCacheTTL = 60 * time.Second
+	if raw := str("VALUES_CACHE_TTL", ""); raw != "" {
+		d, err := parseDays(raw)
+		if err != nil || d < 0 {
+			errs = append(errs, fmt.Errorf("VALUES_CACHE_TTL: invalid value %q (e.g. 60s, 0 to disable)", raw))
+		}
+		app.ValuesCacheTTL = d
+	}
+	app.ActivityMaxDay = num("ACTIVITY_MAX_DAY_BYTES", 50<<20, parseBytes)
+	app.RunHome = strings.ToLower(str("RUN_HOME", RunHomePerRun))
+	if app.RunHome != RunHomePerRun && app.RunHome != RunHomeShared {
+		errs = append(errs, fmt.Errorf("RUN_HOME: unknown value %q (want per-run or shared)", app.RunHome))
+	}
+	if raw := str("HOME_SKELETON", ""); raw != "" {
+		app.HomeSkeleton = dir("HOME_SKELETON", raw)
+		if info, err := os.Stat(app.HomeSkeleton); err != nil || !info.IsDir() {
+			errs = append(errs, fmt.Errorf("HOME_SKELETON: %s is not a directory", app.HomeSkeleton))
+		}
+	}
 	app.Auth = loadAuth(getenv, str, dur, &errs)
+	app.Auth.MaxFailuresPerIP = count("LOGIN_MAX_FAILURES_PER_IP", 20)
+	app.Auth.MaxFailuresGlobal = count("LOGIN_MAX_FAILURES_GLOBAL", 100)
 	return app, errors.Join(errs...)
 }
 
@@ -178,6 +239,9 @@ func loadAuth(getenv func(string) string, str func(string, string) string, dur f
 		return a
 	}
 	if a.Type == AuthNone {
+		if v, _ := strconv.ParseBool(str("ALLOW_NO_AUTH", "")); !v {
+			fail("AUTH_TYPE=none makes every visitor an admin; set ALLOW_NO_AUTH=true as well to confirm (local development only)")
+		}
 		return a
 	}
 
@@ -249,11 +313,31 @@ func loadAuth(getenv func(string) string, str func(string, string) string, dur f
 		if !strings.HasPrefix(a.LDAP.URL, "ldap://") && !strings.HasPrefix(a.LDAP.URL, "ldaps://") && a.LDAP.URL != "" {
 			fail("LDAP_URL must start with ldap:// or ldaps://")
 		}
+		insecure, _ := strconv.ParseBool(str("LDAP_INSECURE", ""))
+		if strings.HasPrefix(a.LDAP.URL, "ldap://") && !a.LDAP.StartTLS && !insecure {
+			fail("LDAP_URL uses ldap:// without LDAP_START_TLS=true, so passwords would cross the network in clear text; use ldaps://, set LDAP_START_TLS=true, or LDAP_INSECURE=true for local testing")
+		}
 		if !strings.Contains(a.LDAP.UserFilter, "{username}") {
 			fail("LDAP_USER_FILTER must contain {username}")
 		}
 	}
 	return a
+}
+
+// checkProxyCIDR refuses proxy ranges so wide that clients could spoof their address.
+func checkProxyCIDR(s string) error {
+	p, err := netip.ParsePrefix(s)
+	if err != nil {
+		a, aerr := netip.ParseAddr(s)
+		if aerr != nil {
+			return fmt.Errorf("%q is not an address or CIDR", s)
+		}
+		p = netip.PrefixFrom(a, a.BitLen())
+	}
+	if (p.Addr().Is4() && p.Bits() < 8) || (!p.Addr().Is4() && p.Bits() < 32) {
+		return fmt.Errorf("%q is too wide: only your ingress or load balancer ranges may set X-Forwarded-For", s)
+	}
+	return nil
 }
 
 func decodeKey(s string) ([]byte, error) {

@@ -19,6 +19,7 @@ const options = reactive<Record<string, Option[]>>({})
 const optionHints = reactive<Record<string, string>>({})
 const errors = ref<Record<string, string>>({})
 const formErrors = ref<string[]>([])
+const busyRun = ref('') // the user's run in progress, when only one is allowed
 const submitting = ref(false)
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -70,7 +71,12 @@ async function loadOptions(name: string) {
     optionHints[name] = ''
   } catch (e) {
     options[name] = []
-    optionHints[name] = e instanceof ApiError && e.details.length ? e.details.join('; ') : 'Could not load the values'
+    optionHints[name] =
+      e instanceof ApiError && e.status === 429
+        ? 'Busy loading other lists. Change a field or reload to try again.'
+        : e instanceof ApiError && e.details.length
+          ? e.details.join('; ')
+          : 'Could not load the values'
   }
 }
 
@@ -88,6 +94,7 @@ async function run() {
   submitting.value = true
   errors.value = {}
   formErrors.value = []
+  busyRun.value = ''
   try {
     const { id } = await api.startRun(props.name, buildRunBody(script.value.parameters, values, touched))
     refreshRunning()
@@ -97,6 +104,9 @@ async function run() {
       const mapped = fieldErrors(e.details)
       errors.value = mapped.fields
       formErrors.value = mapped.other.length || Object.keys(mapped.fields).length ? mapped.other : [e.message]
+    } else if (e instanceof ApiError && e.status === 429 && e.message.includes('already have a run')) {
+      formErrors.value = ['You already have a run in progress. Wait for it to finish or stop it first.']
+      busyRun.value = e.details[0] ?? ''
     } else if (e instanceof ApiError && e.status === 429) {
       formErrors.value = ['Too many scripts are running right now. Try again in a moment.']
     } else {
@@ -142,6 +152,7 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
         <ul>
           <li v-for="(m, i) in formErrors" :key="i">{{ m }}</li>
         </ul>
+        <RouterLink v-if="busyRun" :to="{ name: 'run', params: { id: busyRun } }">Open your running run</RouterLink>
       </div>
       <div class="row">
         <button class="btn btn-primary" type="submit" :disabled="submitting">

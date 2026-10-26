@@ -46,6 +46,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: health
+              containerPort: 8081
           env:
             {{- include "runwarden.env" . | nindent 12 }}
             {{- with .Values.extraEnv }}
@@ -69,12 +71,12 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: health
             periodSeconds: 20
           readinessProbe:
             httpGet:
               path: /readyz
-              port: http
+              port: health
             periodSeconds: 5
           {{- with .Values.resources }}
           resources:
@@ -94,6 +96,11 @@ spec:
             {{- if .Values.runners.configs }}
             - name: runners
               mountPath: /etc/runwarden/runners
+              readOnly: true
+            {{- end }}
+            {{- if .Values.runs.homeSkeletonConfigMap }}
+            - name: home-skeleton
+              mountPath: /etc/runwarden/home-skeleton
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -120,6 +127,11 @@ spec:
         - name: runners
           configMap:
             name: {{ include "runwarden.fullname" . }}-runners
+        {{- end }}
+        {{- with .Values.runs.homeSkeletonConfigMap }}
+        - name: home-skeleton
+          configMap:
+            name: {{ . }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
