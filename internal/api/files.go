@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"io/fs"
 	"net/http"
 	"os"
@@ -48,17 +47,26 @@ func (s *Server) parameterFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := filepath.Join(append([]string{p.FileDir}, segments...)...)
-	if !inside(p.FileDir, dir) {
+	rel := filepath.Join(append([]string{"."}, segments...)...)
+	if !filepath.IsLocal(rel) {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	// os.Root refuses paths that leave file_dir, also through symlinks.
+	root, err := os.OpenRoot(p.FileDir)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "unknown directory")
 		return
 	}
-	entries, err := os.ReadDir(dir)
+	defer func() { _ = root.Close() }()
+	dir, err := root.Open(rel)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			writeError(w, http.StatusNotFound, "unknown directory")
-			return
-		}
+		writeError(w, http.StatusNotFound, "unknown directory")
+		return
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list the directory")
 		return
 	}
@@ -97,18 +105,4 @@ func (s *Server) parameterFiles(w http.ResponseWriter, r *http.Request) {
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
-}
-
-// inside reports whether dir resolves (following symlinks) to base or a directory below it.
-func inside(base, dir string) bool {
-	realBase, err := filepath.EvalSymlinks(base)
-	if err != nil {
-		return false
-	}
-	realDir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(realBase, realDir)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

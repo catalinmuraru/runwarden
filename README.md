@@ -691,3 +691,8 @@ Dockerfile         base image
 (`:8081`), a separate listener that the Helm chart does not expose through the Service or
 ingress. On the web port they answer `404`: without a session, the web port offers only sign-in
 and the UI shell.
+
+## License
+
+Runwarden is free software, licensed under the GNU General Public License v3.0 or later. See
+[LICENSE](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).

@@ -1,9 +1,9 @@
 # Example scripts image: how a scripts repository builds on the Runwarden base image.
 # Scripts, their tools and runner configs live in this layer; Runwarden updates only change BASE.
 #
-#   docker build -f examples/Dockerfile --build-arg BASE=ghcr.io/catalinmuraru/runwarden:0.1.0 -t my-scripts .
+#   docker build -f examples/Dockerfile --build-arg BASE=ghcr.io/catalinmuraru/runwarden:0.4.0 -t my-scripts .
 
-ARG BASE=ghcr.io/catalinmuraru/runwarden:latest
+ARG BASE=ghcr.io/catalinmuraru/runwarden:0.4.0@sha256:9c16b3966c8aabbd79e35e96d7a0c7aeee381a1043ce924ed893238078113107
 FROM ${BASE}
 
 # Install the tools your scripts need here, e.g.:
