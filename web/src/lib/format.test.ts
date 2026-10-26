@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, groupScripts, statusLabel } from './format'
+import { formatDuration, formatSeconds, groupScripts, statusLabel } from './format'
 
 describe('formatDuration', () => {
   const t0 = '2026-10-24T10:00:00Z'
@@ -32,5 +32,15 @@ describe('groupScripts', () => {
       ['Ops', ['a', 'z']],
       ['Other', ['b']],
     ])
+  })
+})
+
+describe('formatSeconds', () => {
+  it('formats timeouts', () => {
+    expect(formatSeconds(4 * 3600)).toBe('4h')
+    expect(formatSeconds(5400)).toBe('1h 30m')
+    expect(formatSeconds(45 * 60)).toBe('45m')
+    expect(formatSeconds(90)).toBe('1m 30s')
+    expect(formatSeconds(0)).toBe('')
   })
 })

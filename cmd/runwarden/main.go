@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/catalinmuraru/runwarden/internal/activity"
 	"github.com/catalinmuraru/runwarden/internal/api"
 	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/auth"
@@ -59,6 +60,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("history: %w", err)
 	}
+	acts, err := activity.Open(cfg.DataDir, cfg.Auth.SessionTTL)
+	if err != nil {
+		return fmt.Errorf("activity: %w", err)
+	}
+	audit.SetSink(acts.Add)
+	defer func() {
+		if err := acts.Flush(); err != nil {
+			slog.Error("activity: save users", "err", err)
+		}
+	}()
 	clientIP, err := clientip.New(cfg.TrustedProxies)
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
@@ -96,10 +107,12 @@ func run() error {
 		ClientIP:       clientIP,
 		Authenticate:   authH.Middleware,
 		Policy:         policy,
+		Activity:       acts,
 	}, ex, hist)
 	apiSrv.SetCatalog(cat)
 	go reloadOnHangup(ctx, cfg, apiSrv)
-	go cleanHistory(ctx, cfg, hist)
+	go cleanHistory(ctx, cfg, hist, acts)
+	go flushActivity(ctx, acts)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -172,7 +185,7 @@ func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, clientIP 
 
 // loadCatalog loads the runner configs, logging problems; scripts with errors are left out.
 func loadCatalog(cfg config.App) (*config.Catalog, error) {
-	cat, err := config.LoadDir(cfg.RunnersDir, config.Options{BaseDir: cfg.BaseDir})
+	cat, err := config.LoadDir(cfg.RunnersDir, config.Options{BaseDir: cfg.BaseDir, MaxTimeout: cfg.RunTimeoutMax})
 	if err != nil {
 		return nil, fmt.Errorf("runners: %w", err)
 	}
@@ -211,7 +224,7 @@ func reloadOnHangup(ctx context.Context, cfg config.App, apiSrv *api.Server) {
 }
 
 // cleanHistory applies the retention settings at startup and then every hour.
-func cleanHistory(ctx context.Context, cfg config.App, hist *history.Store) {
+func cleanHistory(ctx context.Context, cfg config.App, hist *history.Store, acts *activity.Store) {
 	if cfg.HistoryMaxAge == 0 && cfg.HistoryMaxRuns == 0 {
 		return
 	}
@@ -226,10 +239,29 @@ func cleanHistory(ctx context.Context, cfg config.App, hist *history.Store) {
 			audit.Log(ctx, audit.Event{Action: audit.HistoryCleanup, Category: "file", Type: "deletion", Success: true,
 				Count: n, Message: fmt.Sprintf("history cleanup removed %d runs", n)})
 		}
+		if _, err := acts.Cleanup(cfg.HistoryMaxAge, time.Now()); err != nil {
+			slog.Error("activity cleanup", "err", err)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		}
+	}
+}
+
+// flushActivity saves the users index every minute.
+func flushActivity(ctx context.Context, acts *activity.Store) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if err := acts.Flush(); err != nil {
+				slog.Error("activity: save users", "err", err)
+			}
 		}
 	}
 }

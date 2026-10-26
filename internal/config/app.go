@@ -21,6 +21,7 @@ type App struct {
 	DataDir           string        // DATA_DIR, default "./data"; history and uploads
 	MaxConcurrentRuns int           // MAX_CONCURRENT_RUNS, default 10
 	RunTimeout        time.Duration // RUN_TIMEOUT, default 60m
+	RunTimeoutMax     time.Duration // RUN_TIMEOUT_MAX, default 24h; largest per-script "timeout"
 	KillGrace         time.Duration // KILL_GRACE, default 10s
 	MaxOutputBytes    int64         // MAX_OUTPUT_BYTES, default 10Mi
 	MaxUploadBytes    int64         // MAX_UPLOAD_BYTES, default 100Mi
@@ -124,6 +125,7 @@ func LoadApp(getenv func(string) string) (App, error) {
 		DataDir:           dir("DATA_DIR", "data"),
 		MaxConcurrentRuns: int(num("MAX_CONCURRENT_RUNS", 10, integer)),
 		RunTimeout:        dur("RUN_TIMEOUT", 60*time.Minute),
+		RunTimeoutMax:     dur("RUN_TIMEOUT_MAX", 24*time.Hour),
 		KillGrace:         dur("KILL_GRACE", 10*time.Second),
 		MaxOutputBytes:    num("MAX_OUTPUT_BYTES", 10<<20, parseBytes),
 		MaxUploadBytes:    num("MAX_UPLOAD_BYTES", 100<<20, parseBytes),

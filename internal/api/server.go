@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/catalinmuraru/runwarden/internal/activity"
 	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/auth"
 	"github.com/catalinmuraru/runwarden/internal/authz"
@@ -28,6 +29,8 @@ type Options struct {
 	// Without it every API request is rejected.
 	Authenticate func(http.Handler) http.Handler
 	Policy       authz.Policy
+	// Activity, if set, records who uses the server and serves the admin pages.
+	Activity *activity.Store
 }
 
 // Server serves the API.
@@ -105,7 +108,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 			})
 		}
 	}
-	h := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, authenticate(fn)) }
+	h := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, authenticate(s.trackActivity(fn))) }
 	h("GET /api/scripts", s.listScripts)
 	h("GET /api/scripts/{name}", s.getScript)
 	h("GET /api/scripts/{name}/parameters/{param}/values", s.parameterValues)
@@ -119,6 +122,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	h("POST /api/runs/{id}/kill", s.runSignal)
 	h("GET /api/runs/{id}/files/{file}", s.runFile)
 	h("GET /api/runs/{id}/ws", s.runSocket)
+	h("GET /api/admin/users", s.adminOnly(s.adminUsers))
+	h("GET /api/admin/activity", s.adminOnly(s.adminActivity))
 	// Unknown API paths get JSON instead of the UI's index page.
 	mux.Handle("GET /api/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

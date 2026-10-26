@@ -81,7 +81,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := currentUser(r)
-	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name})
+	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout})
 	switch {
 	case errors.Is(err, executor.ErrBusy):
 		refused("too many runs in progress")
@@ -283,13 +283,25 @@ func (s *Server) checkDynamicValues(r *http.Request, sc *config.Script, raw map[
 	return problems
 }
 
+// listRuns lists the runs the user may see, newest first, filtered by script, user and status.
+// Running runs come from the executor, so polling them does not read the whole history.
 func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	runs, err := s.hist.List(history.Filter{
-		Script:  r.URL.Query().Get("script"),
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	f := history.Filter{
+		Script:  q.Get("script"),
+		User:    q.Get("user"),
+		Status:  q.Get("status"),
 		Limit:   limit,
 		Visible: func(m history.Meta) bool { return s.canSee(r, m) },
-	})
+	}
+	var runs []history.Meta
+	var err error
+	if f.Status == string(executor.StatusRunning) {
+		runs = s.runningRuns(r, f)
+	} else {
+		runs, err = s.hist.List(f)
+	}
 	if err != nil {
 		slog.Error("list runs", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not read history")
@@ -451,4 +463,22 @@ func (s *Server) runFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, name, info.ModTime(), f)
+}
+
+// runningRuns returns the visible runs in progress that match f, newest first.
+func (s *Server) runningRuns(r *http.Request, f history.Filter) []history.Meta {
+	var out []history.Meta
+	for _, id := range s.exec.Running() {
+		m, ok := s.runMeta(r, id)
+		if !ok || m.Status != string(executor.StatusRunning) ||
+			(f.Script != "" && m.Script != f.Script) || (f.User != "" && !strings.EqualFold(f.User, m.User)) {
+			continue
+		}
+		out = append(out, m)
+	}
+	slices.SortFunc(out, func(a, b history.Meta) int { return b.Started.Compare(a.Started) })
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out
 }

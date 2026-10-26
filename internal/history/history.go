@@ -174,6 +174,8 @@ func (s *Store) Cleanup(maxAge time.Duration, maxRuns int, now time.Time) (int, 
 // Filter narrows List.
 type Filter struct {
 	Script  string
+	User    string // case-insensitive
+	Status  string
 	Limit   int             // default 100
 	Visible func(Meta) bool // if set, only runs it accepts are listed (applied before Limit)
 }
@@ -189,13 +191,27 @@ func (s *Store) List(f Filter) ([]Meta, error) {
 	}
 	var out []Meta
 	for _, m := range all {
-		if (f.Script != "" && m.Script != f.Script) || (f.Visible != nil && !f.Visible(m)) {
+		if (f.Script != "" && m.Script != f.Script) || (f.User != "" && !strings.EqualFold(f.User, m.User)) ||
+			(f.Status != "" && m.Status != f.Status) || (f.Visible != nil && !f.Visible(m)) {
 			continue
 		}
 		out = append(out, m)
 		if len(out) == f.Limit {
 			break
 		}
+	}
+	return out, nil
+}
+
+// RunsByUser counts the recorded runs per user (lower-case name).
+func (s *Store) RunsByUser() (map[string]int, error) {
+	all, err := s.all()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	for _, m := range all {
+		out[strings.ToLower(m.User)]++
 	}
 	return out, nil
 }

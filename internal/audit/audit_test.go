@@ -83,3 +83,21 @@ func TestSuccessIsInfoAndOmitsEmptyFields(t *testing.T) {
 		}
 	}
 }
+
+func TestSink(t *testing.T) {
+	var got []Record
+	SetSink(func(r Record) { got = append(got, r) })
+	t.Cleanup(func() { SetSink(nil) })
+	code := 3
+	Log(t.Context(), Event{Action: RunEnd, User: "alice", Script: "S", RunID: "r1", ExitCode: &code,
+		Duration: 1500 * time.Millisecond, Values: map[string]any{"Token": "******"}})
+	SetSink(nil)
+	Log(t.Context(), Event{Action: RunStart, Success: true})
+	if len(got) != 1 {
+		t.Fatalf("sink got %d records, want 1", len(got))
+	}
+	r := got[0]
+	if r.Outcome != "failure" || r.User != "alice" || r.DurationMS != 1500 || *r.ExitCode != 3 || r.Values["Token"] != "******" || r.Time.IsZero() || r.Message == "" {
+		t.Errorf("record = %+v", r)
+	}
+}

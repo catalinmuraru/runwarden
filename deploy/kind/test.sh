@@ -71,6 +71,14 @@ kubectl -n "$NS" logs deploy/runwarden | jq -ec --arg id "$ID" \
    | {action: .event.action, outcome: .event.outcome, user: .user.name, exit: .process.exit_code, script: .runwarden.script.name}' \
   || fail "no run-end audit event for $ID"
 
+step "Running runs, timeouts and admin pages"
+curl -fs "$B/api/runs?status=running" | jq -e '.runs | type == "array"' >/dev/null || fail "running list"
+curl -fs "$B/api/scripts/Backup%20Database" | jq -e '.timeout_seconds == 7200' >/dev/null || fail "script timeout not applied"
+curl -fs "$B/api/admin/activity?action=run-start" | jq -e --arg id "$ID" '[.events[].run_id] | index($id)' >/dev/null \
+  || fail "run-start missing from the activity log"
+curl -fs "$B/api/admin/users" | jq -e '.users | length > 0' >/dev/null || fail "users index empty"
+echo "running list, per-script timeout, activity log and users index work"
+
 step "Workspace"
 kubectl -n "$NS" exec deploy/runwarden -- sh -c 'touch /var/lib/runwarden-work/probe && echo "workspace writable"' \
   || fail "workspace not writable"
@@ -89,6 +97,10 @@ kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m >/dev/null
 forward
 curl -fs "$B/api/runs/$ID" | jq -e '.status == "finished"' >/dev/null || fail "run lost after restart"
 echo "run $ID still in history"
+curl -fs "$B/api/admin/activity?action=run-end" | jq -e --arg id "$ID" '[.events[].run_id] | index($id)' >/dev/null \
+  || fail "activity log lost after restart"
+curl -fs "$B/api/admin/users" | jq -e '.users | length > 0' >/dev/null || fail "users index lost after restart"
+echo "activity log and users index survive the restart"
 
 echo
 echo "PASS: Runwarden runs in kind"
