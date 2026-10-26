@@ -18,14 +18,13 @@ func newAuthorizer(t *testing.T) *Authorizer {
 			{Name: "acceptance", Match: []string{"acc*"}},
 			{Name: "production", Match: []string{"prod*"}},
 		},
-		Bootstrap: []string{"Boss"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
 	_, _, err = store.Update(1, func(p *policy.Policy) error {
-		p.Users = []policy.UserRoles{{Name: "dev", Roles: []string{policy.RoleDeveloper}}}
+		p.Users = []policy.UserRoles{{Name: "dev", Roles: []string{policy.RoleDeveloper}}, {Name: "Boss", Roles: []string{policy.RoleDevops}}}
 		p.Rules = []policy.Rule{
 			{Role: policy.RoleDeveloper, Scripts: []string{"tag:developer"}, Environments: []string{"development"}, Access: policy.Run},
 			{Role: policy.RoleDeveloper, Scripts: []string{"tag:developer"}, Environments: []string{"acceptance", "production"}, Access: policy.View},
@@ -65,7 +64,7 @@ func TestRolesAndAdmins(t *testing.T) {
 		admin bool
 	}{
 		{auth.User{Name: "dev"}, false},
-		{auth.User{Name: "boss"}, true}, // bootstrap list, case-insensitive
+		{auth.User{Name: "boss"}, true}, // devops in the policy, case-insensitive
 		{auth.User{Name: auth.LocalAdminName, Method: auth.MethodLocal}, true},
 		{auth.User{Name: auth.LocalAdminName, Method: "gitlab"}, false},         // only the built-in method
 		{auth.User{Name: "guest", Groups: []string{"devops", "admins"}}, false}, // groups never grant rights

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +42,6 @@ type adminUser struct {
 	Running  int      `json:"running"`
 	Admin    bool     `json:"admin"`
 	Roles    []string `json:"roles"`             // empty: guest
-	Fixed    bool     `json:"fixed,omitempty"`   // devops through the deployment (bootstrap list)
 	Sessions int      `json:"sessions"`          // valid sign-in sessions
 	Methods  []string `json:"methods,omitempty"` // how those sessions signed in
 	// Exceptions counts the user's active exceptions.
@@ -90,7 +88,6 @@ func (s *Server) adminUsers(w http.ResponseWriter, _ *http.Request) {
 			au.Roles = []string{}
 		}
 		au.Admin = s.opts.Access.IsAdmin(authUser(u))
-		au.Fixed = s.opts.Access.Store != nil && slices.ContainsFunc(s.opts.Access.Store.Bootstrap(), func(b string) bool { return strings.EqualFold(b, u.Name) })
 		for _, e := range pol.Exceptions {
 			if strings.EqualFold(e.User, u.Name) && e.Active(now) {
 				au.Exceptions++
@@ -120,17 +117,10 @@ func (s *Server) adminUsers(w http.ResponseWriter, _ *http.Request) {
 		}
 		out = append(out, au)
 	}
-	// Users given roles (or listed in the deployment) before they first signed in.
-	var pending []string
+	// Users given roles before they first signed in.
 	for _, u := range pol.Users {
-		pending = append(pending, u.Name)
-	}
-	if s.opts.Access.Store != nil {
-		pending = append(pending, s.opts.Access.Store.Bootstrap()...)
-	}
-	for _, name := range pending {
-		if !listed[strings.ToLower(name)] {
-			au := describe(activity.User{Name: name})
+		if !listed[strings.ToLower(u.Name)] {
+			au := describe(activity.User{Name: u.Name})
 			au.Status = statusNever
 			out = append(out, au)
 		}

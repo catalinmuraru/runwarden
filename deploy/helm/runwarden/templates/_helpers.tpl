@@ -74,11 +74,11 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- $_ := set $e "SESSION_TTL" (toString $a.sessionTTL) -}}
 {{- with $a.publicUrl }}{{ $_ := set $e "PUBLIC_URL" . }}{{ end -}}
 {{- if not (kindIs "invalid" $a.cookieSecure) }}{{ $_ := set $e "COOKIE_SECURE" (toString $a.cookieSecure) }}{{ end -}}
-{{- if $a.adminGroups -}}
-{{- fail "auth.adminGroups was removed: groups no longer grant rights. List the first administrators in auth.bootstrapDevops and give roles in the Admin area" -}}
+{{- range $old := list "adminUsers" "adminGroups" "bootstrapDevops" -}}
+{{- if index $a $old -}}
+{{- fail (printf "auth.%s was removed: set auth.initialAdmin=true, sign in as the built-in administrator and give the devops role to the first user in the Admin area" $old) -}}
 {{- end -}}
-{{- $devops := concat ($a.bootstrapDevops | default list) ($a.adminUsers | default list) | uniq -}}
-{{- with $devops }}{{ $_ := set $e "BOOTSTRAP_DEVOPS" (join "," .) }}{{ end -}}
+{{- end -}}
 {{- $p := .Values.policy -}}
 {{- with $p.environments }}{{ $_ := set $e "POLICY_ENVIRONMENTS" (toJson .) }}{{ end -}}
 {{- with $p.unknownEnvironment }}{{ $_ := set $e "POLICY_UNKNOWN_ENVIRONMENT" . }}{{ end -}}

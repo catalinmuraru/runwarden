@@ -45,9 +45,6 @@ type App struct {
 
 // Access configures the access policy (roles, rules and exceptions are edited in the Admin area).
 type Access struct {
-	// BootstrapDevops are devops whatever the policy says (BOOTSTRAP_DEVOPS, and the deprecated
-	// ADMIN_USERS).
-	BootstrapDevops []string
 	// Environments seed a new policy (POLICY_ENVIRONMENTS, JSON); an existing policy keeps its own.
 	Environments       []EnvironmentSeed
 	UnknownEnvironment string // POLICY_UNKNOWN_ENVIRONMENT; empty: the last environment
@@ -247,27 +244,22 @@ func LoadApp(getenv func(string) string) (App, error) {
 	app.Auth = loadAuth(getenv, str, dur, &errs)
 	app.Auth.MaxFailuresPerIP = count("LOGIN_MAX_FAILURES_PER_IP", 20)
 	app.Auth.MaxFailuresGlobal = count("LOGIN_MAX_FAILURES_GLOBAL", 100)
-	app.Access = loadAccess(getenv, str, &errs)
+	app.Access = loadAccess(str, &errs)
 	app.Access.MaxExceptionDays = count("POLICY_MAX_EXCEPTION_DAYS", 90)
 	return app, errors.Join(errs...)
 }
 
-func loadAccess(getenv func(string) string, str func(string, string) string, errs *[]error) Access {
+func loadAccess(str func(string, string) string, errs *[]error) Access {
 	a := Access{
-		BootstrapDevops:    list(getenv("BOOTSTRAP_DEVOPS")),
 		Environments:       DefaultEnvironments,
 		UnknownEnvironment: str("POLICY_UNKNOWN_ENVIRONMENT", ""),
 	}
-	if old := list(getenv("ADMIN_USERS")); len(old) > 0 {
-		a.Warnings = append(a.Warnings, "ADMIN_USERS is deprecated; use BOOTSTRAP_DEVOPS (its users get the devops role)")
-		for _, u := range old {
-			if !slices.ContainsFunc(a.BootstrapDevops, func(b string) bool { return strings.EqualFold(b, u) }) {
-				a.BootstrapDevops = append(a.BootstrapDevops, u)
-			}
+	// Admins are only made in the Admin area: the built-in administrator (INITIAL_ADMIN) gives the
+	// first devops user the role. Settings of older versions are reported, not applied.
+	for _, name := range []string{"ADMIN_USERS", "ADMIN_GROUPS", "BOOTSTRAP_DEVOPS"} {
+		if str(name, "") != "" {
+			a.Warnings = append(a.Warnings, name+" is ignored: sign in as the built-in administrator (INITIAL_ADMIN=true) and give the devops role in the Admin area")
 		}
-	}
-	if str("ADMIN_GROUPS", "") != "" {
-		a.Warnings = append(a.Warnings, "ADMIN_GROUPS is ignored: groups no longer grant rights; give users the devops role in the Admin area or list them in BOOTSTRAP_DEVOPS")
 	}
 	if raw := str("POLICY_ENVIRONMENTS", ""); raw != "" {
 		var envs []EnvironmentSeed

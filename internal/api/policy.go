@@ -30,7 +30,6 @@ type policyScript struct {
 type policyView struct {
 	Policy           *policy.Policy `json:"policy"`
 	Warnings         []string       `json:"warnings"`
-	Bootstrap        []string       `json:"bootstrap"`          // devops through the deployment
 	MaxExceptionDays int            `json:"max_exception_days"` // 0: no limit
 	Scripts          []policyScript `json:"scripts"`
 	Tags             []string       `json:"tags"`
@@ -51,11 +50,8 @@ func (s *Server) policyOnly(fn http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) policyView(p *policy.Policy) policyView {
 	store := s.policyStore()
-	v := policyView{Policy: p, Warnings: []string{}, Bootstrap: []string{}, Scripts: []policyScript{}, Tags: []string{},
+	v := policyView{Policy: p, Warnings: []string{}, Scripts: []policyScript{}, Tags: []string{},
 		MaxExceptionDays: store.MaxExceptionDays()}
-	if b := store.Bootstrap(); b != nil {
-		v.Bootstrap = b
-	}
 	if c := s.catalog.Load(); c != nil {
 		if w := p.Warnings(c); w != nil {
 			v.Warnings = w

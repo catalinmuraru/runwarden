@@ -171,16 +171,22 @@ curl -fs -b "$JAR" "$B/api/admin/policy/effective?role=developer" \
 curl -fs -b "$JAR" "$B/api/admin/activity?action=policy-change" | jq -e '.events | length == 1' >/dev/null || fail "policy change not audited"
 curl -fs -b "$JAR" "$B/api/admin/policy/export" | grep -q 'tag:developer' || fail "export misses the rule"
 echo "environments seeded, rule created, developer access computed, change audited, export works"
+rev=$(curl -fs -b "$JAR" "$B/api/admin/policy" | jq .policy.revision)
+curl -fs -b "$JAR" -X PUT "$B/api/admin/policy/users/alice" -H 'Content-Type: application/json' \
+  -d "{\"revision\":$rev,\"roles\":[\"devops\"]}" >/dev/null || fail "devops role not given to the first user"
+echo "the built-in administrator gave the devops role to alice (before her first sign-in)"
 
 upgrade --set-json 'auth.methods=["ldap"]' --set auth.ldap.url=ldaps://ldap.invalid,auth.ldap.userBaseDN=dc=example,auth.cookieSecure=false
 code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$B/api/me")
 [ "$code" = "401" ] || fail "built-in admin session still valid after disabling ($code)"
 kubectl -n "$NS" exec deploy/runwarden -- test ! -e /var/lib/runwarden/initial-admin-password || fail "password file not removed"
 rm -f "$JAR"
-kubectl -n "$NS" exec deploy/runwarden -- cat /var/lib/runwarden/policy.json | jq -e '.rules | length == 1' >/dev/null \
-  || fail "policy not kept on the data volume"
+kubectl -n "$NS" exec deploy/runwarden -- cat /var/lib/runwarden/policy.json \
+  | jq -e '(.rules | length == 1) and ([.users[] | select(.roles | index("devops")) | .name] == ["alice"])' >/dev/null \
+  || fail "policy (rule, devops user) not kept on the data volume"
+if kubectl -n "$NS" logs deploy/runwarden | grep -q 'nobody has the devops role'; then fail "no-devops warning although alice is devops"; fi
 upgrade
-echo "disabled: password file removed, admin session refused; policy kept across restarts"
+echo "disabled: password file removed, admin session refused; policy and devops user kept across restarts"
 
 echo
 echo "PASS: Runwarden runs in kind"

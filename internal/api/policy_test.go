@@ -156,7 +156,7 @@ func TestPolicyAdmin(t *testing.T) {
 		t.Errorf("non-admin GET policy = %d", code)
 	}
 	v := root.policy()
-	if len(v.Policy.Environments) != 2 || len(v.Bootstrap) != 1 || v.MaxExceptionDays != 30 || len(v.Tags) != 1 || v.Tags[0] != "ops" {
+	if len(v.Policy.Environments) != 2 || v.MaxExceptionDays != 30 || len(v.Tags) != 1 || v.Tags[0] != "ops" {
 		t.Errorf("policy view = %+v", v)
 	}
 	rev := v.Policy.Revision
@@ -272,7 +272,7 @@ func TestPolicyAdmin(t *testing.T) {
 	if u := found["erin"]; u.Status != statusNever || len(u.Roles) != 1 {
 		t.Errorf("erin = %+v", u)
 	}
-	if u := found["root"]; !u.Fixed || !u.Admin {
+	if u := found["root"]; !u.Admin {
 		t.Errorf("root = %+v", u)
 	}
 }
