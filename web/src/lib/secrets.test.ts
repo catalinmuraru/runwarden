@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SecretsOverview } from '../api'
-import { gapCount, secretCell, secretColumns } from './secrets'
+import { gapCount, kubeGapCount, secretCell, secretColumns } from './secrets'
 
 const overview: SecretsOverview = {
   configured: true,
@@ -11,6 +11,15 @@ const overview: SecretsOverview = {
     { name: 'Copy', secrets: ['DB', 'TOKEN'], missing: { production: ['DB'] }, envless: false },
     { name: 'Report', secrets: ['TOKEN'], missing: {}, envless: true },
   ],
+  kubernetes: {
+    configured: true,
+    clusters: [{ environment: 'development', server: 'https://dev:6443' }],
+    unknown_dirs: [],
+    scripts: [
+      { name: 'Deploy', missing: ['production'] },
+      { name: 'Scale', missing: [] },
+    ],
+  },
 }
 
 describe('secrets matrix', () => {
@@ -27,5 +36,8 @@ describe('secrets matrix', () => {
   })
   it('counts the gaps', () => {
     expect(gapCount(overview)).toBe(1)
+  })
+  it('counts the Kubernetes gaps', () => {
+    expect(kubeGapCount(overview)).toBe(1)
   })
 })

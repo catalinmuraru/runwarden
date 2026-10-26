@@ -54,6 +54,15 @@ type Request struct {
 	User    string                  // signed-in user, exported to the script as RUNWARDEN_USER
 	// Secrets are exported to the script (name → value) and masked in its output.
 	Secrets map[string]string
+	// Kube pins the run to its environment's cluster; nil: no kubeconfig is written.
+	Kube *Kube
+}
+
+// Kube is the kubeconfig of a run, written into its private HOME as KUBECONFIG, with the
+// variables naming its contexts.
+type Kube struct {
+	Config []byte
+	Env    map[string]string
 }
 
 // ErrBusy is returned when the concurrent run limit is reached.
@@ -157,7 +166,7 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 	}
 	// A private TMPDIR (and HOME) per run, so concurrent runs neither collide on files nor see
 	// each other's credentials and contexts.
-	tmpDir, vars, err := e.env.prepareRunDir(id)
+	tmpDir, vars, err := e.env.prepareRunDir(id, req.Kube)
 	if err != nil {
 		return nil, err
 	}

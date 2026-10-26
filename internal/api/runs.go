@@ -98,13 +98,26 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not start the run")
 		return
 	}
+	// The cluster of the environment, for scripts that use one; refused like a missing secret.
+	kc, clusters, err := s.resolveKube(sc, uses)
+	switch {
+	case secretRefusal(err):
+		refused(err.Error())
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	case err != nil:
+		slog.Error("resolve kubeconfig", "script", sc.Name, "err", err)
+		refused("could not read the kubeconfig")
+		writeError(w, http.StatusInternalServerError, "could not start the run")
+		return
+	}
 	if problems := s.checkDynamicValues(r, sc, raw, values); len(problems) > 0 {
 		refused("invalid parameters: " + strings.Join(problems, "; "))
 		writeError(w, http.StatusBadRequest, "invalid parameters", problems...)
 		return
 	}
 
-	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout, Secrets: sec.Env})
+	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout, Secrets: sec.Env, Kube: kc})
 	switch {
 	case errors.Is(err, executor.ErrUserBusy):
 		refused("user already has a run in progress")
@@ -130,7 +143,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(), Values: masked, Args: run.MaskedArgs, Environments: envs,
 		Secrets: sec.Names()}
 	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Environments: envs,
-		Secrets: sec.Names(), Terminal: run.Terminal}
+		Secrets: sec.Names(), Clusters: clusters, Terminal: run.Terminal}
 	files := history.OutputFiles{Patterns: sc.OutputFiles, Dir: sc.WorkingDirectory}
 	err = s.hist.Track(run, meta, files, func() {
 		res := run.Result()

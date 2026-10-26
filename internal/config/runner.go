@@ -25,7 +25,10 @@ type Script struct {
 	// EnvTarget (needs run access there) or EnvSource (needs view access there).
 	EnvironmentParameters map[string]string
 	// Secrets are the names of the secrets a run receives from its environment (see package secrets).
-	Secrets     []string
+	Secrets []string
+	// Kubernetes runs get the kubeconfig of their environment (see package kube): choosing the
+	// environment chooses the cluster.
+	Kubernetes  bool
 	OutputFiles []string // globs offered for download after a run
 	// RedactPatterns are regexes whose matches are masked in the output, for secrets a script
 	// prints that are not parameters (e.g. generated passwords).

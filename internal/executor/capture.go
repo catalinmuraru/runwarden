@@ -20,8 +20,9 @@ const (
 // Capture runs a short helper command, such as a script listing the allowed values of a
 // parameter, and returns its stdout. It uses the same environment policy and process-group
 // handling as runs, is not counted against the run limit, and is killed after 30 seconds.
-// secrets are exported to it and masked in what it returns.
-func (e *Executor) Capture(ctx context.Context, command []string, dir string, secrets map[string]string) ([]byte, error) {
+// secrets are exported to it and masked in what it returns; kube (may be nil) pins it to a
+// cluster as for runs.
+func (e *Executor) Capture(ctx context.Context, command []string, dir string, secrets map[string]string, kube *Kube) ([]byte, error) {
 	if len(command) == 0 {
 		return nil, errors.New("executor: empty command")
 	}
@@ -29,7 +30,7 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string, se
 	defer cancel()
 
 	// Helpers get a private TMPDIR and HOME too, removed afterwards.
-	dir0, vars, err := e.env.prepareRunDir(fmt.Sprintf("values-%d", e.helperSeq.Add(1)))
+	dir0, vars, err := e.env.prepareRunDir(fmt.Sprintf("values-%d", e.helperSeq.Add(1)), kube)
 	if err != nil {
 		return nil, err
 	}

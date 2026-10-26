@@ -404,3 +404,32 @@ func TestSecretsField(t *testing.T) {
 		t.Errorf("warnings = %v", cat.Warnings)
 	}
 }
+
+func TestKubernetesField(t *testing.T) {
+	dir := t.TempDir()
+	env := `"parameters": [{"name": "Env", "type": "list", "values": ["dev"]}]`
+	files := map[string]string{
+		"ok.json":     `{"name": "Ok", "script_path": "run.sh", "kubernetes": true, "environment_parameters": {"Env": "target"}, ` + env + `}`,
+		"off.json":    `{"name": "Off", "script_path": "run.sh"}`,
+		"noenv.json":  `{"name": "NoEnv", "script_path": "run.sh", "kubernetes": true}`,
+		"source.json": `{"name": "Source", "script_path": "run.sh", "kubernetes": true, "environment_parameters": {"Env": "source"}, ` + env + `}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cat, err := LoadDir(dir, Options{BaseDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := cat.Script("Ok"); s == nil || !s.Kubernetes {
+		t.Errorf("ok = %+v", s)
+	}
+	if s := cat.Script("Off"); s == nil || s.Kubernetes {
+		t.Errorf("off = %+v", s)
+	}
+	if len(cat.Errors) != 2 || !strings.Contains(cat.Errors[0].Msg, "needs a target environment parameter") {
+		t.Errorf("errors = %v", cat.Errors)
+	}
+}

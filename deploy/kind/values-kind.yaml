@@ -1,6 +1,7 @@
-# Values for the local kind test: the examples image loaded into the cluster, no sign-in.
+# Values for the local kind test: the examples image plus kubectl and a test runner, loaded
+# into the cluster, no sign-in.
 image:
-  repository: runwarden-examples
+  repository: runwarden-e2e
   tag: dev
   pullPolicy: Never
 auth:
@@ -22,3 +23,9 @@ secrets:
   environments:
     development: runwarden-secrets-development
     production: runwarden-secrets-production
+# Kubeconfigs of three ServiceAccounts, one namespace each (created by deploy/kind/test.sh).
+kube:
+  environments:
+    development: runwarden-kube-development
+    acceptance: runwarden-kube-acceptance
+    production: runwarden-kube-production

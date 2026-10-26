@@ -24,6 +24,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
+	"github.com/catalinmuraru/runwarden/internal/kube"
 	"github.com/catalinmuraru/runwarden/internal/logging"
 	"github.com/catalinmuraru/runwarden/internal/policy"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
@@ -118,6 +119,7 @@ func run() error {
 		Access:         access,
 		Activity:       acts,
 		Secrets:        secrets.Store{Dir: cfg.SecretsDir},
+		Kube:           kube.Store{Dir: cfg.KubeDir},
 
 		ValuesMaxPerUser: cfg.ValuesMaxPerUser,
 		ValuesMaxGlobal:  cfg.ValuesMaxGlobal,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, type SecretsOverview } from '../../api'
-import { gapCount, secretCell, secretColumns } from '../../lib/secrets'
+import { gapCount, kubeGapCount, secretCell, secretColumns } from '../../lib/secrets'
 
 const data = ref<SecretsOverview | null>(null)
 const error = ref('')
@@ -77,5 +77,54 @@ defineExpose({ load })
         <dd>{{ names.length ? names.join(', ') : '(empty)' }}</dd>
       </template>
     </dl>
+
+    <h2>Kubernetes</h2>
+    <p class="muted">
+      Runners with <code>"kubernetes": true</code> get the kubeconfig of the environment they run in (one Kubernetes Secret per
+      environment). Only the cluster server is shown here, never credentials.
+    </p>
+    <p v-if="!data.kubernetes.configured" class="alert">No kubeconfig directory is configured (<code>KUBE_DIR</code>).</p>
+    <p v-if="data.kubernetes.unknown_dirs.length" class="alert" role="alert">
+      Kubeconfig for {{ data.kubernetes.unknown_dirs.join(', ') }}: no environment has that name, so no run receives it. Rename the
+      environment or the mounted Secret (Helm <code>kube.environments</code>).
+    </p>
+    <p v-if="!data.kubernetes.clusters.length" class="muted">No kubeconfig mounted.</p>
+    <div v-else class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Environment</th>
+            <th scope="col">Cluster server</th>
+            <th scope="col">Namespace</th>
+            <th scope="col">Context</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="c in data.kubernetes.clusters" :key="c.environment">
+            <th scope="row">{{ c.environment }}</th>
+            <td v-if="c.error" colspan="3"><span class="badge tone-bad">unusable</span> {{ c.error }}</td>
+            <template v-else>
+              <td><code>{{ c.server }}</code></td>
+              <td>{{ c.namespace || '–' }}</td>
+              <td class="muted">{{ c.context }}</td>
+            </template>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <template v-if="data.kubernetes.scripts.length">
+      <p v-if="kubeGapCount(data)" class="tone-warn">
+        {{ kubeGapCount(data) }} script/environment combination(s) cannot start: no usable kubeconfig there.
+      </p>
+      <dl class="meta card">
+        <template v-for="s in data.kubernetes.scripts" :key="s.name">
+          <dt>{{ s.name }}</dt>
+          <dd>
+            <span v-if="!s.missing.length" class="badge tone-ok">✓ all environments</span>
+            <span v-else class="badge tone-bad">missing {{ s.missing.join(', ') }}</span>
+          </dd>
+        </template>
+      </dl>
+    </template>
   </template>
 </template>

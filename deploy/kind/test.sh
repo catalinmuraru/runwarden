@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the images, deploys the Helm chart into a local kind cluster and checks that Runwarden
 # works there: scripts run, output streams over WebSocket, the security context is enforced and
-# history survives a pod restart, and the built-in administrator works. KEEP=1 leaves the release and cluster running.
+# history survives a pod restart, runs are pinned to their environment's cluster, and the built-in
+# administrator works. KEEP=1 leaves the release and cluster running.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -22,7 +23,39 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 step "Images"
 docker build -q --build-arg VERSION=v0.0.0-kind -t runwarden:dev . >/dev/null
 docker build -q -f examples/Dockerfile --build-arg BASE=runwarden:dev -t runwarden-examples:dev . >/dev/null
-kind load docker-image runwarden-examples:dev --name "$CLUSTER"
+# Test-only layer: kubectl and a runner with "kubernetes": true.
+E2E=$(mktemp -d)
+cp "$(command -v kubectl)" "$E2E/kubectl"
+cat > "$E2E/kube_whoami.json" <<'EOF'
+{ "name": "Kube Whoami", "group": "Test", "script_path": "/opt/runwarden/e2e/kube_whoami.sh",
+  "working_directory": ".", "requires_terminal": false, "tags": ["devops"], "kubernetes": true,
+  "environment_parameters": { "Environment": "target", "Source": "source" },
+  "parameters": [
+    { "name": "Environment", "type": "list", "required": true, "values": ["development", "acceptance", "production"] },
+    { "name": "Source", "type": "list", "values": ["development", "acceptance", "production"] },
+    { "name": "Wait", "type": "text", "default": "0", "env_var": "WAIT" } ] }
+EOF
+cat > "$E2E/kube_whoami.sh" <<'EOF'
+#!/usr/bin/env bash
+sleep "${WAIT:-0}"
+echo "context=$(kubectl config current-context) var=$RUNWARDEN_KUBE_CONTEXT source=${RUNWARDEN_KUBE_SOURCE_CONTEXT:-}"
+echo "marker=$(kubectl get configmap marker -o jsonpath='{.data.env}')"
+for ns in rw-development rw-acceptance rw-production; do
+  if kubectl get configmaps -n "$ns" >/dev/null 2>&1; then echo "list $ns: allowed"; else echo "list $ns: denied"; fi
+done
+if [ -n "${RUNWARDEN_KUBE_SOURCE_CONTEXT:-}" ]; then
+  echo "source marker=$(kubectl --context "$RUNWARDEN_KUBE_SOURCE_CONTEXT" get configmap marker -o jsonpath='{.data.env}')"
+fi
+EOF
+cat > "$E2E/Dockerfile" <<'EOF'
+FROM runwarden-examples:dev
+COPY --chmod=0755 kubectl /usr/local/bin/kubectl
+COPY kube_whoami.json /etc/runwarden/runners/
+COPY --chmod=0755 kube_whoami.sh /opt/runwarden/e2e/
+EOF
+docker build -q -t runwarden-e2e:dev "$E2E" >/dev/null
+rm -rf "$E2E"
+kind load docker-image runwarden-e2e:dev --name "$CLUSTER"
 
 step "Install"
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -35,6 +68,23 @@ secret() { kubectl -n "$NS" create secret generic "$1" "${@:2}" --dry-run=client
 secret runwarden-secrets-common --from-literal=API_TOKEN=common-api-token
 secret runwarden-secrets-development --from-literal=DB_PASSWORD="$DEV_DB"
 secret runwarden-secrets-production --from-literal=DB_PASSWORD="$PROD_DB"
+# One namespace + ServiceAccount per environment; each may read only its own ConfigMaps.
+CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+for env in development acceptance production; do
+  ns=rw-$env
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n "$ns" create serviceaccount runner --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n "$ns" create role read-configmaps --verb=get,list --resource=configmaps --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n "$ns" create rolebinding runner --role=read-configmaps --serviceaccount="$ns:runner" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n "$ns" create configmap marker --from-literal=env="$env" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  token=$(kubectl -n "$ns" create token runner --duration=2h)
+  printf '%s\n' "apiVersion: v1" "kind: Config" "current-context: kind-$env" \
+    "clusters: [{name: kind, cluster: {server: 'https://kubernetes.default.svc', certificate-authority-data: '$CA'}}]" \
+    "users: [{name: runner, user: {token: '$token'}}]" \
+    "contexts: [{name: kind-$env, context: {cluster: kind, user: runner, namespace: $ns}}]" \
+    | kubectl -n "$NS" create secret generic "runwarden-kube-$env" --from-file=config=/dev/stdin --dry-run=client -o yaml \
+    | kubectl apply -f - >/dev/null
+done
 helm upgrade --install runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 3m
 kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m
 
@@ -144,6 +194,45 @@ kubectl -n "$NS" exec deploy/runwarden -- sh -c 'test ! -e /var/run/secrets/kube
   || fail "service account token mounted"
 echo "uid 10001, read-only root, writable /tmp and HOME, no API token"
 
+step "Kubernetes clusters per environment"
+upgrade() {
+  helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml "$@" --wait --timeout 3m >/dev/null
+  kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m >/dev/null
+  forward
+}
+upgrade --set limits.maxRunsPerUser=0
+kube_run() { curl -fs -X POST "$B/api/scripts/Kube%20Whoami/runs" -H 'Content-Type: application/json' -d "{\"values\":$1}" | jq -r .id; }
+kube_out() { timeout 60 websocat -t --no-close "ws://127.0.0.1:$PORT/api/runs/$1/ws" </dev/null >/dev/null || true; curl -fs "$B/api/runs/$1/output"; }
+dev_id=$(kube_run '{"Environment":"development","Wait":"5"}') || fail "development run did not start"
+prod_id=$(kube_run '{"Environment":"production","Wait":"5"}') || fail "production run did not start"
+curl -fs "$B/api/runs?status=running" | jq -e --arg a "$dev_id" --arg b "$prod_id" '[.runs[].id] | (index($a) != null) and (index($b) != null)' >/dev/null \
+  || fail "development and production runs were not running at the same time"
+dev=$(kube_out "$dev_id")
+prod=$(kube_out "$prod_id")
+for env in development production; do
+  out=$dev; [ "$env" = production ] && out=$prod
+  echo "$out" | grep -q "context=$env var=$env source=$" || fail "$env run not pinned: $out"
+  echo "$out" | grep -q "marker=$env" || fail "$env run landed in the wrong namespace: $out"
+  for other in development acceptance production; do
+    want=denied; [ "$other" = "$env" ] && want=allowed
+    echo "$out" | grep -q "list rw-$other: $want" || fail "$env run: listing rw-$other not $want: $out"
+  done
+done
+pair_id=$(kube_run '{"Environment":"development","Source":"production"}') || fail "two-environment run did not start"
+pair=$(kube_out "$pair_id")
+echo "$pair" | grep -q "context=development var=development source=production" && echo "$pair" | grep -q "source marker=production" \
+  || fail "two-environment run: $pair"
+curl -fs "$B/api/runs/$pair_id" | jq -e '[.clusters[].environment] == ["development","production"] and .clusters[0].server == "https://kubernetes.default.svc"' >/dev/null \
+  || fail "history does not show the clusters"
+if echo "$dev$prod$pair" | grep -q 'eyJ'; then fail "a token reached the run output"; fi
+admin=$(curl -fs "$B/api/admin/secrets")
+echo "$admin" | jq -e '.kubernetes.configured and ([.kubernetes.clusters[] | select((.error // "") == "") | .environment] | sort) == ["acceptance","development","production"]' >/dev/null \
+  || fail "admin overview does not list the three clusters"
+if echo "$admin" | grep -q 'eyJ'; then fail "a token reached the admin overview"; fi
+[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /etc/runwarden/kube/production/config)" = "440" ] || fail "kubeconfig file mode"
+upgrade
+echo "concurrent development + production runs pinned to their own namespace and ServiceAccount; source context in two-environment runs; history and admin show servers, never tokens"
+
 step "NetworkPolicy"
 api_ip=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')
 probe() { kubectl -n "$NS" exec deploy/runwarden -- timeout 3 bash -c "echo > /dev/tcp/$api_ip/443" >/dev/null 2>&1; }
@@ -171,11 +260,6 @@ curl -fs "$B/api/admin/users" | jq -e '.users | length > 0' >/dev/null || fail "
 echo "activity log and users index survive the restart"
 
 step "Built-in administrator"
-upgrade() {
-  helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml "$@" --wait --timeout 3m >/dev/null
-  kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m >/dev/null
-  forward
-}
 upgrade --set-json 'auth.methods=[]' --set auth.initialAdmin=true,auth.cookieSecure=false
 JAR=$(mktemp)
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/api/scripts")

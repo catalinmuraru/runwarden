@@ -40,6 +40,7 @@ type Meta struct {
 	Values          map[string]any `json:"values,omitempty"`
 	Environments    []string       `json:"environments,omitempty"` // environments the run touches ("-" for none)
 	Secrets         []string       `json:"secrets,omitempty"`      // names of the secrets the run received
+	Clusters        []Cluster      `json:"clusters,omitempty"`     // Kubernetes clusters the run was pinned to, target first
 	Status          string         `json:"status"`
 	ExitCode        *int           `json:"exit_code,omitempty"`
 	Started         time.Time      `json:"started"`
@@ -47,6 +48,13 @@ type Meta struct {
 	OutputTruncated bool           `json:"output_truncated,omitempty"`
 	Files           []string       `json:"files,omitempty"`
 	Terminal        bool           `json:"terminal,omitempty"`
+}
+
+// Cluster is what a run's history shows about a Kubernetes cluster it was pinned to.
+type Cluster struct {
+	Environment string `json:"environment"`
+	Server      string `json:"server"`
+	Namespace   string `json:"namespace,omitempty"`
 }
 
 // OutputFiles says which files a run produces for download.

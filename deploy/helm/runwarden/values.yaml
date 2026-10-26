@@ -110,6 +110,17 @@ secrets:
   #   development: runwarden-secrets-development
   #   production: runwarden-secrets-production
 
+# Kubernetes cluster per environment: each value is the name of a Kubernetes Secret holding a
+# kubeconfig under the key "config", mounted read-only at /etc/runwarden/kube/<environment>/config.
+# Runners with "kubernetes": true get the kubeconfig of the environment they run in, with its
+# context renamed to the environment name. The file is opaque to Runwarden: credentials its exec
+# plugin needs come from `secrets` of the same environment. Several environments may share a
+# cluster (namespace set in the context). Needs runs.home=per-run.
+kube:
+  environments: {}
+  #   development: runwarden-kube-development
+  #   production: runwarden-kube-production
+
 # Access policy: roles, rules and exceptions are edited in the Admin area and kept on the data
 # volume (policy.json). The environments here only seed a new policy; afterwards they are
 # managed in the Admin area too.
