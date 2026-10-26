@@ -141,11 +141,11 @@ func TestLoadAuth(t *testing.T) {
 		{
 			name: "several methods, in order",
 			vars: with(gitlab, oidc, ldap, map[string]string{"AUTH_METHODS": " GitLab, ldap ,oidc", "OIDC_SCOPES": "groups openid",
-				"ADMIN_GROUPS": "admins, ops", "SESSION_TTL": "1h", "GITLAB_REQUIRED_GROUP": "/company/runwarden/", "OIDC_LABEL": "Keycloak"}),
+				"SESSION_TTL": "1h", "GITLAB_REQUIRED_GROUP": "/company/runwarden/", "OIDC_LABEL": "Keycloak"}),
 			check: func(t *testing.T, a Auth) {
 				if !slices.Equal(a.Methods, []string{"gitlab", "ldap", "oidc"}) || a.NoAuth || a.InitialAdmin ||
 					a.PublicURL != "https://rw.example.com" || !a.CookieSecure || len(a.SessionKey) != 32 || a.SessionTTL != time.Hour ||
-					!slices.Equal(a.AdminGroups, []string{"admins", "ops"}) || len(a.Warnings) != 0 {
+					len(a.Warnings) != 0 {
 					t.Errorf("auth = %+v", a)
 				}
 				if !slices.Equal(a.OIDC.Scopes, []string{"openid", "profile", "email", "groups"}) || a.OIDC.UsernameClaim != "preferred_username" ||
@@ -301,5 +301,37 @@ func TestConfigTraps(t *testing.T) {
 		if _, err := LoadApp(env(vars)); err != nil {
 			t.Errorf("%v: %v", extra, err)
 		}
+	}
+}
+
+func TestAccessSettings(t *testing.T) {
+	base := map[string]string{"AUTH_METHODS": "none", "ALLOW_NO_AUTH": "true"}
+	app, err := LoadApp(env(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := app.Access
+	if len(a.Environments) != 3 || a.Environments[2].Name != "production" || a.MaxExceptionDays != 90 || len(a.BootstrapDevops) != 0 || len(a.Warnings) != 0 {
+		t.Errorf("defaults = %+v", a)
+	}
+
+	vars := map[string]string{"BOOTSTRAP_DEVOPS": "ann, bob", "ADMIN_USERS": "BOB,carl", "ADMIN_GROUPS": "admins",
+		"POLICY_ENVIRONMENTS": `[{"name":"dev","match":["d-*"]},{"name":"prod"}]`, "POLICY_UNKNOWN_ENVIRONMENT": "dev", "POLICY_MAX_EXCEPTION_DAYS": "7"}
+	for k, v := range base {
+		vars[k] = v
+	}
+	app, err = LoadApp(env(vars))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a = app.Access
+	if !slices.Equal(a.BootstrapDevops, []string{"ann", "bob", "carl"}) || len(a.Warnings) != 2 || a.MaxExceptionDays != 7 ||
+		len(a.Environments) != 2 || a.Environments[0].Match[0] != "d-*" || a.UnknownEnvironment != "dev" {
+		t.Errorf("access = %+v", a)
+	}
+
+	vars["POLICY_ENVIRONMENTS"] = "dev,prod"
+	if _, err := LoadApp(env(vars)); err == nil || !strings.Contains(err.Error(), "POLICY_ENVIRONMENTS") {
+		t.Errorf("non-JSON environments: %v", err)
 	}
 }

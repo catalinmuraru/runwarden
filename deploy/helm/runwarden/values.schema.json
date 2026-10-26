@@ -25,8 +25,28 @@
         "maxFailuresGlobal": { "type": "integer", "minimum": 0 },
         "publicUrl": { "type": "string" },
         "cookieSecure": { "type": ["boolean", "null"] },
-        "adminUsers": { "type": "array", "items": { "type": "string" } },
-        "adminGroups": { "type": "array", "items": { "type": "string" } }
+        "bootstrapDevops": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "adminUsers": { "type": "array", "items": { "type": "string" }, "description": "deprecated: use bootstrapDevops" },
+        "adminGroups": { "type": "array", "items": { "type": "string" }, "description": "removed: groups no longer grant rights" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "environments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$" },
+              "match": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            },
+            "additionalProperties": false
+          }
+        },
+        "unknownEnvironment": { "type": "string" },
+        "maxExceptionDays": { "type": "integer", "minimum": 0 }
       }
     },
     "existingSecret": { "type": "string" },

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, ApiError, type Option, type ScriptDetail } from '../api'
 import ParamField from '../components/ParamField.vue'
+import { accessSummary, decorateOptions, startBlocker } from '../lib/access'
 import { buildRunBody, dependencyQuery, fieldErrors, initialValue, type FieldValue } from '../lib/form'
 import { renderMarkdown } from '../lib/markdown'
 import { formatSeconds } from '../lib/format'
@@ -22,6 +23,9 @@ const formErrors = ref<string[]>([])
 const busyRun = ref('') // the user's run in progress, when only one is allowed
 const submitting = ref(false)
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
+
+const blocker = computed(() => (script.value ? startBlocker(script.value, values, options) : ''))
+const environments = computed(() => (script.value ? accessSummary(script.value) : { run: [], view: [] }))
 
 async function load() {
   script.value = null
@@ -100,7 +104,9 @@ async function run() {
     refreshRunning()
     await router.push({ name: 'run', params: { id } })
   } catch (e) {
-    if (e instanceof ApiError && e.status === 400) {
+    if (e instanceof ApiError && e.status === 403) {
+      formErrors.value = [e.message]
+    } else if (e instanceof ApiError && e.status === 400) {
       const mapped = fieldErrors(e.details)
       errors.value = mapped.fields
       formErrors.value = mapped.other.length || Object.keys(mapped.fields).length ? mapped.other : [e.message]
@@ -129,6 +135,10 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
     <h1>{{ script.name }}</h1>
     <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown escapes everything first -->
     <div v-if="script.description" class="description" v-html="renderMarkdown(script.description)" />
+    <p v-if="environments.run.length || environments.view.length" class="muted small">
+      <template v-if="environments.run.length">You can run it on {{ environments.run.join(', ') }}.</template>
+      <template v-if="environments.view.length"> View only on {{ environments.view.join(', ') }}.</template>
+    </p>
     <p v-if="script.timeout_seconds" class="muted small">Runs are stopped automatically after {{ formatSeconds(script.timeout_seconds) }}.</p>
 
     <form class="card stack" style="margin-top: 1rem" novalidate @submit.prevent="run">
@@ -139,7 +149,7 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
           :param="p"
           :script="script.name"
           :model-value="values[p.name]"
-          :options="options[p.name]"
+          :options="decorateOptions(p, options[p.name])"
           :options-hint="optionHints[p.name]"
           :error="errors[p.name]"
           @update:model-value="update(p.name, $event)"
@@ -154,8 +164,9 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
         </ul>
         <RouterLink v-if="busyRun" :to="{ name: 'run', params: { id: busyRun } }">Open your running run</RouterLink>
       </div>
+      <p v-if="blocker" class="muted" role="status">{{ blocker }}</p>
       <div class="row">
-        <button class="btn btn-primary" type="submit" :disabled="submitting">
+        <button class="btn btn-primary" type="submit" :disabled="submitting || !!blocker">
           {{ submitting ? 'Starting…' : 'Run' }}
         </button>
         <RouterLink :to="{ name: 'runs', query: { script: script.name } }">Previous runs</RouterLink>

@@ -30,8 +30,10 @@ auth:
   sessionTTL: 12h
   # true/false; unset means true unless publicUrl is http://.
   cookieSecure: null
-  adminUsers: []
-  adminGroups: []
+  # Users who are devops (every script, every run, the Admin area) whatever the access policy
+  # says, e.g. the first administrators. Everyone else is a guest until given a role in the Admin
+  # area. Groups from the identity provider never grant rights.
+  bootstrapDevops: []
   oidc:
     issuerUrl: ""
     clientId: ""
@@ -99,6 +101,24 @@ valueScripts:
 # file reaches this size. The application log (stdout) keeps everything.
 activity:
   maxDayBytes: 50Mi
+
+# Access policy: roles, rules and exceptions are edited in the Admin area and kept on the data
+# volume (policy.json). The environments here only seed a new policy; afterwards they are
+# managed in the Admin area too.
+policy:
+  # Ordered from least to most sensitive. A script parameter value belongs to the first
+  # environment whose name or pattern (* any characters, ? one) matches.
+  environments:
+    - name: development
+      match: ["dev*", "test*"]
+    - name: acceptance
+      match: ["acc*", "uat*"]
+    - name: production
+      match: ["prod*", "prd*"]
+  # Environment of values that match nothing; empty means the last (most sensitive) one.
+  unknownEnvironment: ""
+  # Longest time-limited exception an administrator may grant (0 = no limit).
+  maxExceptionDays: 90
 
 # Extra hosts allowed to open WebSockets (the server's own host always is).
 allowedOrigins: []

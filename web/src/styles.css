@@ -70,6 +70,7 @@ main.container { padding-top: 1.25rem; padding-bottom: 3rem; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
 .btn-danger { color: var(--bad); border-color: var(--bad); }
 .btn-quiet { border-color: transparent; background: transparent; }
+a.btn { display: inline-block; text-decoration: none; color: inherit; }
 
 .badge {
   display: inline-block; white-space: nowrap; font-size: 0.8rem; font-weight: 600; padding: 0.05rem 0.5rem;
@@ -139,10 +140,10 @@ dl.meta dd { margin: 0; overflow-wrap: anywhere; }
   display: inline-block; margin-left: 0.3rem; min-width: 1.2rem; padding: 0 0.3rem; border-radius: 999px;
   background: var(--info); color: var(--surface); font-size: 0.75rem; font-weight: 700; text-align: center;
 }
-.tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin: 0.75rem 0 1rem; }
+.tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin: 0.75rem 0 1rem; overflow-x: auto; }
 .tabs button {
   font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
-  padding: 0.4rem 0.75rem; cursor: pointer;
+  padding: 0.4rem 0.75rem; cursor: pointer; white-space: nowrap;
 }
 .tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
 .filters { margin-bottom: 1rem; }
@@ -151,3 +152,8 @@ dl.meta dd { margin: 0; overflow-wrap: anywhere; }
 .small { font-size: 0.85rem; }
 .table-wrap { overflow-x: auto; }
 .table-wrap td { overflow-wrap: anywhere; }
+.tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.35rem; }
+.picker > summary { cursor: pointer; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.picker[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.picker > div { border: 1px solid var(--border); border-top: 0; padding: 0.5rem 0.6rem; max-height: 18rem; overflow: auto; }
+table.matrix td { text-align: center; }

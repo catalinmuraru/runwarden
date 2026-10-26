@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/catalinmuraru/runwarden/internal/config"
 )
@@ -20,11 +23,17 @@ func checkConfig(args []string, out io.Writer) int {
 		return 1
 	}
 	for _, s := range cat.Scripts {
+		details := []string{fmt.Sprintf("%d parameters", len(s.Parameters))}
 		if s.Timeout > 0 {
-			_, _ = fmt.Fprintf(out, "ok       %s (%d parameters, timeout %s)\n", s.Name, len(s.Parameters), s.Timeout)
-			continue
+			details = append(details, "timeout "+s.Timeout.String())
 		}
-		_, _ = fmt.Fprintf(out, "ok       %s (%d parameters)\n", s.Name, len(s.Parameters))
+		if len(s.Tags) > 0 {
+			details = append(details, "tags "+strings.Join(s.Tags, ", "))
+		}
+		for _, name := range slices.Sorted(maps.Keys(s.EnvironmentParameters)) {
+			details = append(details, fmt.Sprintf("environment from %q (%s)", name, s.EnvironmentParameters[name]))
+		}
+		_, _ = fmt.Fprintf(out, "ok       %s (%s)\n", s.Name, strings.Join(details, "; "))
 	}
 	for _, w := range cat.Warnings {
 		_, _ = fmt.Fprintf(out, "warning  %s\n", w)

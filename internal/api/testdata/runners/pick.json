@@ -2,7 +2,7 @@
   "name": "Pick",
   "script_path": "testdata/scripts/echo.sh",
   "working_directory": ".",
-  "allowed_users": ["@ops"],
+  "tags": ["ops"],
   "parameters": [
     { "name": "Flat", "type": "server_file", "file_dir": "replaced-in-tests",
       "file_extensions": ["log"], "excluded_files": ["secret*"] },

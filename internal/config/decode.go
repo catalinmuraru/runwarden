@@ -112,8 +112,10 @@ type rawScript struct {
 	WorkingDirectory string            `json:"working_directory"`
 	Description      string            `json:"description"`
 	Group            string            `json:"group"`
-	AllowedUsers     []string          `json:"allowed_users"`
-	AdminUsers       []string          `json:"admin_users"`
+	AllowedUsers     json.RawMessage   `json:"allowed_users"` // ignored: rules decide access
+	AdminUsers       json.RawMessage   `json:"admin_users"`   // ignored: rules decide access
+	Tags             stringOrList      `json:"tags"`
+	EnvParams        map[string]string `json:"environment_parameters"`
 	OutputFiles      []string          `json:"output_files"`
 	RedactPatterns   []string          `json:"redact_patterns"`
 	RequiresTerminal *flexBool         `json:"requires_terminal"`

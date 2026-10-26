@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api, type ScriptSummary } from '../api'
 import { groupScripts } from '../lib/format'
 import { summary } from '../lib/markdown'
+import { session } from '../session'
 
 const scripts = ref<ScriptSummary[]>([])
 const filter = ref('')
@@ -22,7 +23,7 @@ onMounted(async () => {
 const groups = computed(() => {
   const q = filter.value.trim().toLowerCase()
   const visible = q
-    ? scripts.value.filter((s) => `${s.name} ${s.group ?? ''} ${s.description ?? ''}`.toLowerCase().includes(q))
+    ? scripts.value.filter((s) => `${s.name} ${s.group ?? ''} ${s.description ?? ''} ${(s.tags ?? []).join(' ')}`.toLowerCase().includes(q))
     : scripts.value
   return groupScripts(visible)
 })
@@ -38,6 +39,10 @@ const groups = computed(() => {
 
   <p v-if="loading" class="muted">Loading…</p>
   <p v-else-if="error" class="alert" role="alert">{{ error }}</p>
+  <div v-else-if="scripts.length === 0 && !session.me?.roles.length" class="card stack">
+    <strong>You have no access yet.</strong>
+    <span class="muted">You are signed in as {{ session.me?.name }}. Ask an administrator to give you a role.</span>
+  </div>
   <p v-else-if="scripts.length === 0" class="muted">No scripts are available to you.</p>
   <p v-else-if="groups.length === 0" class="muted">No script matches “{{ filter }}”.</p>
 
@@ -52,6 +57,9 @@ const groups = computed(() => {
       >
         <strong>{{ s.name }}</strong>
         <span class="muted">{{ summary(s.description) }}</span>
+        <span v-if="s.tags?.length" class="tags">
+          <span v-for="t in s.tags" :key="t" class="badge">{{ t }}</span>
+        </span>
       </RouterLink>
     </div>
   </details>

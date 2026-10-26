@@ -15,28 +15,37 @@ single binary and container image and is meant to run on Kubernetes.
   can be passed as arguments, environment variables or stdin.
 - **Live output** streamed to an in-browser terminal over WebSocket, with stop and kill.
 - **History**: execution logs and metadata kept on disk.
-- **Authentication** via OIDC, GitLab or LDAP; per-script allowed users, groups and admins.
+- **Authentication** via GitLab, OIDC or LDAP, with server-side sessions.
+- **Access control** by roles (guest, developer, consultant, devops and your own), environments
+  and script tags: rules give a role view or run access per script and environment, and
+  time-limited exceptions give one user more for a while. All of it is managed in the Admin area.
 - **Audit log** of who ran what with which parameters, also browsable by admins in the UI.
 - **Admin overview**: everyone's runs, who is signed in, and the activity log.
 - **Browser notifications** when your runs finish.
 
 ## Web UI
 
-- **Scripts**: the scripts you may run, grouped and filterable.
+- **Scripts**: the scripts you may see, grouped and filterable (by name, group, description or
+  tag). Users without a role are told to ask an administrator for access.
 - **Script page**: description and a form generated from the parameters (lists that depend on
   other fields reload as you type, server files are browsed, uploads attach files); server-side
-  validation errors appear next to the fields.
+  validation errors appear next to the fields. Environments you may only view are marked
+  "view only", and Run is disabled (with the reason) while one is selected.
 - **Run page**: live terminal with colours, an input line for scripts that ask questions, Stop and
   Kill, the masked arguments and values, downloadable output files, and "Run again" with the same
   values. Reloading or losing the connection resumes the output where it stopped.
-- **Running**: runs in progress, with Stop — your own, or every run on the server for global
-  admins. The header shows how many are running.
-- **History**: runs you may see (your own; all runs of scripts you administer; everything for
-  global admins), filterable by script, status and (admins) user.
-- **Admin** (global admins only): **Users** — everyone who signed in, their groups, status
-  (active now / signed in / signed out), last activity, last sign-in, address and run counts;
-  **Activity** — the audit trail (runs, input, stop/kill, sign-ins, reloads, clean-ups),
-  filterable by user, action, result and script.
+- **Running**: runs in progress that you may see, with Stop on your own (devops: on every run).
+  The header shows how many are running.
+- **History**: runs you may see (your own, and every run of a script in an environment where you
+  have view access; everything for devops), filterable by script, status and user.
+- **Admin** (devops only): **Users** — everyone who signed in, their roles (changed here), groups
+  from the identity provider (for reference), status, last activity, address, runs and sessions,
+  and users given roles before their first sign-in; **Roles**; **Rules** per role;
+  **Exceptions** (active and ended); **Environments** (with a box to test which environment a
+  value belongs to); **Access** — what a user or role may do, script by environment, and which
+  rule grants it; **Activity** — the audit trail (runs, input, stop/kill, sign-ins, policy
+  changes, reloads, clean-ups), filterable by user, action, result and script. **Export policy**
+  downloads the policy as YAML; **Import policy** replaces it after showing what changes.
 - **Notifications**: the bell in the header turns on browser notifications for your own runs
   (needs HTTPS or localhost). They arrive while a Runwarden tab is open, even in the background.
 
@@ -55,8 +64,11 @@ scanned too). See [examples/runners/](examples/runners/) for complete examples.
   "working_directory": ".",
   "group": "Maintenance",
   "description": "Restarts a service.",
-  "allowed_users": ["@ops", "alice"],
+  "tags": ["developer", "devops"],
+  "environment_parameters": { "Environment": "target" },
   "parameters": [
+    { "name": "Environment", "type": "list", "required": true,
+      "values": ["development", "acceptance", "production"] },
     { "name": "Service", "param": "--service", "type": "list", "required": true,
       "values": ["api", "worker"] },
     { "name": "Dry run", "param": "--dry-run", "no_value": true }
@@ -65,8 +77,8 @@ scanned too). See [examples/runners/](examples/runners/) for complete examples.
 ```
 
 **Script fields:** `name`, `script_path` (path plus optional fixed arguments, never run
-through a shell), `working_directory`, `description`, `group`, `allowed_users` / `admin_users`
-(user names, `@group` or `*`), `output_files` (globs offered for download), `timeout` (this
+through a shell), `working_directory`, `description`, `group`, `tags` (the script's audience, used
+by access rules as `tag:<tag>`), `environment_parameters` (see *Access control*), `output_files` (globs offered for download), `timeout` (this
 script's time limit, e.g. `"4h"` or a number of minutes; default `RUN_TIMEOUT`, at most
 `RUN_TIMEOUT_MAX`), `requires_terminal`,
 `scheduling.enabled`, `include` (merge parameters from other files), `hidden` (only usable as an
@@ -264,7 +276,6 @@ refuses to start without one. Several can be enabled at once (e.g. `gitlab,ldap`
 | `SESSION_KEY` | – | 32 random bytes, base64 (`openssl rand -base64 32`); required unless `none` |
 | `SESSION_TTL` | `12h` | how long a sign-in lasts |
 | `COOKIE_SECURE` | `true` (`false` if `PUBLIC_URL` is `http://`) | `Secure` flag on cookies |
-| `ADMIN_USERS`, `ADMIN_GROUPS` | – | global admins, comma-separated |
 | `GITLAB_URL`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | `https://gitlab.com` | GitLab application (scopes `openid profile email`); user name from `nickname`, groups (full paths) from `groups`, falling back to `groups_direct` |
 | `GITLAB_REQUIRED_GROUP` | – | only members of this group or its subgroups (full path, e.g. `company/ops`) may sign in |
 | `GITLAB_LABEL` | `GitLab` | button text on the sign-in page |
@@ -313,7 +324,7 @@ page ("Sign out everywhere", audited as `session-revoke`). API requests without 
 first admins and for emergencies:
 
 - the sign-in page offers "Administrator"; the account is `admin@local` (no other method may use
-  that name) and is a global admin;
+  that name) and has the devops role;
 - at every start a new random password is written to `DATA_DIR/initial-admin-password` (mode
   0600). It is never logged; the log names only the file:
   `kubectl exec deploy/runwarden -- cat /var/lib/runwarden/initial-admin-password`;
@@ -321,17 +332,7 @@ first admins and for emergencies:
   the method disappears and every session of the built-in administrator ends;
 - it may be the only method (`AUTH_METHODS` empty) to bootstrap a new installation.
 
-Who may do what, from each runner config:
-
-| Setting | Meaning |
-|---|---|
-| `allowed_users` | who may see and run the script: user names, `@group`, or `*` for every signed-in user. Missing means everyone; an empty list means only admins. |
-| `admin_users` | who may see and stop every run of the script. Missing means only global admins. |
-
-Users always see and control their own runs. Global admins (`ADMIN_USERS`, `ADMIN_GROUPS`) may
-do everything: run every script, see and control every run, and open the Admin pages. Names and groups
-match case-insensitively. Scripts and runs a user may not see answer `404`. The signed-in user
-is passed to scripts as `RUNWARDEN_USER`.
+The signed-in user is passed to scripts as `RUNWARDEN_USER`.
 
 ### Local identity providers
 
@@ -347,6 +348,70 @@ AUTH_METHODS=oidc PUBLIC_URL=http://localhost:8080 SESSION_KEY=$(openssl rand -b
 # open http://localhost:8080, choose "Single sign-on" and sign in as alice / alice-password
 ```
 
+## Access control
+
+Who may do what is kept in an **access policy** on the data volume (`DATA_DIR/policy.json`,
+mode 0600), edited in the Admin area. Every change is audited (`policy-change`, with what
+changed), and the policy can be exported and imported as YAML.
+
+- **Roles**: built-in `guest` (every user without a role: signed in, sees nothing), `developer`,
+  `consultant` and `devops` (every script, every environment, every run and the Admin area), plus
+  any roles you add. Roles are assigned to users by hand in the Admin area; groups from GitLab,
+  OIDC or LDAP are shown but **never grant rights**. A user may have several roles. Names match
+  case-insensitively.
+- **Environments** (e.g. development, acceptance, production) group the values that scripts'
+  environment parameters can take. A value belongs to the first environment whose name or
+  pattern matches (`dev*`, `uat?`, case-insensitive); values that match nothing count as the
+  *unknown environment* (by default the last, most sensitive one).
+- **Environment parameters**: a runner config says which of its parameters select an
+  environment, and how: `target` (the run changes it: needs **run** access there) or `source`
+  (the run only reads from it, e.g. the source of a copy: needs **view** access there).
+  `check-config` warns about parameters that look like environments but are not declared.
+  Scripts without environment parameters belong to the pseudo environment `-` ("scripts without
+  environment").
+- **Rules** give a role `view` or `run` access to scripts (`*`, names, or `tag:<tag>`) in
+  environments (`*` or names). Rules only grant; when several match, the highest access wins.
+  Nothing matching means no access.
+- **Exceptions** give one user `view` or `run` access to scripts in environments until a date,
+  with a mandatory reason (at most `POLICY_MAX_EXCEPTION_DAYS`). They end by themselves
+  (audited as `exception-expired`) or early from the Admin area, and stay listed for 30 days.
+
+What each access allows:
+
+| | view | run |
+|---|---|---|
+| see the script, its form and dropdown values for that environment | ✓ | ✓ |
+| see every run of the script there, with its output and files | ✓ | ✓ |
+| start the script with that environment as target | | ✓ |
+
+Users always see and control (input, stop, kill) their own runs; viewers cannot control other
+users' runs (`403`); devops can. A run's environments are recorded with it (and in its audit
+events as `runwarden.environments`). Scripts and runs a user may not see answer `404`; a start
+refused by the rules answers `403` with the reason. Changes apply at once, without signing in
+again.
+
+Example: developers run their scripts on development and look at the other environments,
+consultants run theirs everywhere, and one developer may run an upload on acceptance for a while:
+
+| Who | Scripts | Environments | Access |
+|---|---|---|---|
+| role developer | tag:developer | development | run |
+| role developer | tag:developer | acceptance, production | view |
+| role consultant | tag:consultant | * | run |
+| exception for jdoe until 2026-11-30, "INC-123" | Upload SQL | acceptance | run |
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BOOTSTRAP_DEVOPS` | – | users who are devops whatever the policy says (comma-separated), e.g. the first administrators. `ADMIN_USERS` is read the same way, with a deprecation warning; `ADMIN_GROUPS` is ignored |
+| `POLICY_ENVIRONMENTS` | development `dev*,test*`, acceptance `acc*,uat*`, production `prod*,prd*` | environments of a **new** policy, as JSON: `[{"name":"development","match":["dev*"]}]`; afterwards they are managed in the Admin area |
+| `POLICY_UNKNOWN_ENVIRONMENT` | the last environment | environment of values that match nothing, for a new policy |
+| `POLICY_MAX_EXCEPTION_DAYS` | `90` | longest exception that can be granted (`0`: no limit) |
+
+**Upgrading from `allowed_users` / `admin_users`**: these runner fields and `ADMIN_GROUPS` no
+longer grant anything (the configs still load, with a warning). After the upgrade everyone is a
+guest except `BOOTSTRAP_DEVOPS` users and the built-in administrator: sign in as one of them,
+give users their roles and add rules (tag the scripts in their configs first).
+
 ## API
 
 JSON over HTTP. Errors look like `{"error": "...", "details": ["..."]}`; validation errors name
@@ -354,14 +419,18 @@ the parameter but never echo the submitted value.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/scripts` | list scripts |
-| `GET /api/scripts/{name}` | script with its parameters (form description) |
-| `GET /api/scripts/{name}/parameters/{param}/values?Other=value` | allowed values; for script-provided lists, pass the parameters it depends on |
-| `POST /api/scripts/{name}/runs` | start a run: JSON `{"values": {...}}`, or `multipart/form-data` with a `values` JSON field plus one file per `file_upload` parameter. `201 {"id"}`, `400` invalid values, `429` busy |
+| `GET /api/scripts` | list the scripts you may see (with their `tags`) |
+| `GET /api/scripts/{name}` | script with its parameters (form description) and your `access` per environment; values of environment parameters carry their `environment` and your `access` |
+| `GET /api/scripts/{name}/parameters/{param}/values?Other=value` | allowed values; for script-provided lists, pass the parameters it depends on (`403` when they select an environment you may not view) |
+| `POST /api/scripts/{name}/runs` | start a run: JSON `{"values": {...}}`, or `multipart/form-data` with a `values` JSON field plus one file per `file_upload` parameter. `201 {"id"}`, `400` invalid values, `403` no run access to the environment, `429` busy |
 | `GET /api/runs?script=&user=&status=&limit=` | runs you may see, newest first; `status=running` lists runs in progress |
-| `GET /api/admin/users` | global admins: known users, their status and run counts |
-| `GET /api/admin/activity?user=&action=&outcome=&script=&since=&until=&limit=` | global admins: audit events, newest first (`since`/`until` in RFC 3339) |
-| `GET /api/runs/{id}` | run status and details (secure values masked) |
+| `GET /api/admin/users` | devops: known users, their roles, status and run counts |
+| `GET /api/admin/activity?user=&action=&outcome=&script=&since=&until=&limit=` | devops: audit events, newest first (`since`/`until` in RFC 3339) |
+| `GET /api/admin/policy` | devops: the access policy, warnings, scripts with their tags and environment parameters |
+| `PUT /api/admin/policy/environments`, `POST`/`PUT`/`DELETE /api/admin/policy/roles[/{name}]`, `PUT /api/admin/policy/users/{name}`, `POST`/`PUT`/`DELETE /api/admin/policy/rules[/{id}]`, `POST`/`DELETE /api/admin/policy/exceptions[/{id}]` | devops: change the policy. Every change sends the `revision` it is based on (`DELETE`: `?revision=`); a stale one answers `409` |
+| `GET /api/admin/policy/effective?user=` or `?role=` | devops: resulting access per script and environment, with the rule or exception that grants it |
+| `GET /api/admin/policy/export`, `POST /api/admin/policy/import[?dry_run=true]` | devops: the policy as YAML; import replaces it (`dry_run` only validates and summarizes) |
+| `GET /api/runs/{id}` | run status and details (secure values masked), its `environments`, and `can_control` |
 | `GET /api/runs/{id}/output?offset=N` | output from byte `N`; `X-Next-Offset` and `X-Run-Finished` headers |
 | `POST /api/runs/{id}/input` | `{"line": "yes"}` writes a line to stdin; `{"close": true}` closes stdin |
 | `POST /api/runs/{id}/stop` / `kill` | stop (SIGTERM, then SIGKILL) or kill immediately |
@@ -469,6 +538,9 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
 - **Sign-in**: `auth.methods` (default `[gitlab]`; e.g. `[gitlab, ldap]`), `auth.gitlab.url`
   for your GitLab, `auth.gitlab.requiredGroup`, `auth.initialAdmin`. `[none]` must be confirmed with
   `auth.allowNoAuth: true`. (`auth.type` was replaced by `auth.methods`; the chart says so.)
+- **Access**: `auth.bootstrapDevops` (the first administrators; `auth.adminUsers` still works,
+  `auth.adminGroups` makes the chart fail with a hint), `policy.environments`,
+  `policy.unknownEnvironment` and `policy.maxExceptionDays`.
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
   (e.g. an SSH key from a Secret).
 
@@ -548,7 +620,8 @@ internal/activity/ in-app activity log and users index (admin pages)
 internal/audit/    audit events (ECS)
 internal/api/      REST and WebSocket API
 internal/auth/     sign-in (OIDC, GitLab, LDAP) and sessions
-internal/authz/    who may run scripts and see runs
+internal/policy/   access policy: roles, environments, rules, exceptions (stored as JSON)
+internal/authz/    who may see and run scripts and see and control runs
 internal/web/      embedded UI (built into internal/web/dist/)
 web/               Vue 3 + Vite + TypeScript source
 examples/          example runner configs, scripts and scripts image (Dockerfile)

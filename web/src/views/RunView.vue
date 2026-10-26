@@ -21,6 +21,8 @@ let stream: RunStream | undefined
 let ticker: ReturnType<typeof setInterval> | undefined
 
 const running = computed(() => meta.value?.status === 'running')
+// Viewers (view access to the environment) can watch but not control others' runs.
+const canControl = computed(() => meta.value?.can_control !== false)
 const status = computed(() => statusLabel(meta.value?.status ?? ''))
 
 async function refresh() {
@@ -109,16 +111,21 @@ onBeforeUnmount(() => {
       <span v-if="meta.exit_code !== undefined" class="muted">exit code {{ meta.exit_code }}</span>
       <span v-if="state === 'reconnecting'" class="muted">reconnecting…</span>
       <span class="spacer" />
-      <template v-if="running">
+      <template v-if="running && canControl">
         <button class="btn" type="button" @click="act('stop')">Stop</button>
         <button class="btn btn-danger" type="button" @click="act('kill')">Kill</button>
       </template>
+      <span v-else-if="running" class="muted">View only</span>
       <button v-else class="btn" type="button" @click="runAgain">Run again</button>
     </div>
 
     <dl class="meta card" style="margin: 1rem 0">
       <dt>Started by</dt>
       <dd>{{ meta.user }}</dd>
+      <template v-if="meta.environments?.length && meta.environments[0] !== '-'">
+        <dt>Environments</dt>
+        <dd>{{ meta.environments.join(', ') }}</dd>
+      </template>
       <dt>Started</dt>
       <dd>{{ formatDateTime(meta.started) }}</dd>
       <dt>Duration</dt>
@@ -134,7 +141,7 @@ onBeforeUnmount(() => {
     <TerminalPanel ref="terminal" />
     <p v-if="meta.output_truncated" class="muted">Output was truncated: the run printed more than the storage limit.</p>
 
-    <form v-if="running" class="row" style="margin-top: 0.75rem" @submit.prevent="sendInput">
+    <form v-if="running && canControl" class="row" style="margin-top: 0.75rem" @submit.prevent="sendInput">
       <label for="stdin" class="sr-only">Input for the script</label>
       <input
         id="stdin"

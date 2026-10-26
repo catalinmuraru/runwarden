@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/catalinmuraru/runwarden/internal/audit"
+	"github.com/catalinmuraru/runwarden/internal/authz"
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
@@ -74,13 +75,22 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid parameters", details...)
 		return
 	}
+	user := currentUser(r)
+	// Access depends on the environments the values select; helper scripts for dynamic values
+	// only run once that is settled.
+	uses := s.opts.Access.Uses(sc, func(name string) []string { return valueItems(values[name]) })
+	envs := authz.Environments(uses)
+	if err := s.opts.Access.CheckStart(user, sc, uses); err != nil {
+		refused(err.Error())
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if problems := s.checkDynamicValues(r, sc, raw, values); len(problems) > 0 {
 		refused("invalid parameters: " + strings.Join(problems, "; "))
 		writeError(w, http.StatusBadRequest, "invalid parameters", problems...)
 		return
 	}
 
-	user := currentUser(r)
 	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout})
 	switch {
 	case errors.Is(err, executor.ErrUserBusy):
@@ -103,9 +113,9 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	// The end event is written when the run is over, possibly long after this request: capture
 	// who started it now.
 	end := audit.Event{Action: audit.RunEnd, Category: "process", Type: "end", RunID: run.ID, Script: sc.Name,
-		User: user.Name, Groups: user.Groups, AuthMethod: user.Method, SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(),
-		Values: masked, Args: run.MaskedArgs}
-	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Terminal: run.Terminal}
+		User: user.Name, Roles: s.opts.Access.Roles(user), Groups: user.Groups, AuthMethod: user.Method,
+		SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(), Values: masked, Args: run.MaskedArgs, Environments: envs}
+	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Environments: envs, Terminal: run.Terminal}
 	files := history.OutputFiles{Patterns: sc.OutputFiles, Dir: sc.WorkingDirectory}
 	err = s.hist.Track(run, meta, files, func() {
 		res := run.Result()
@@ -129,7 +139,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r, audit.Event{Action: audit.RunStart, Category: "process", Type: "start", Success: true,
-		RunID: run.ID, Script: sc.Name, Values: masked, Args: run.MaskedArgs,
+		RunID: run.ID, Script: sc.Name, Values: masked, Args: run.MaskedArgs, Environments: envs,
 		Message: fmt.Sprintf("run %s of %q started by %s", run.ID, sc.Name, user.Name)})
 
 	w.Header().Set("Location", "/api/runs/"+run.ID)
@@ -341,7 +351,23 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown run")
 		return
 	}
-	writeJSON(w, http.StatusOK, meta)
+	writeJSON(w, http.StatusOK, struct {
+		history.Meta
+		CanControl bool `json:"can_control"` // may send input, stop and kill (owner, devops)
+	}{meta, s.canControl(r, meta.User)})
+}
+
+// valueItems returns a parameter value as a list of strings (none for flags and empty values).
+func valueItems(v params.Value) []string {
+	switch v.Kind {
+	case params.KindScalar:
+		if v.Str != "" {
+			return []string{v.Str}
+		}
+	case params.KindList:
+		return v.List
+	}
+	return nil
 }
 
 func (s *Server) runOutput(w http.ResponseWriter, r *http.Request) {
@@ -435,8 +461,13 @@ func (s *Server) runSignal(w http.ResponseWriter, r *http.Request) {
 // and 409 for finished ones.
 func (s *Server) liveRun(w http.ResponseWriter, r *http.Request) (*executor.Run, bool) {
 	id := r.PathValue("id")
-	if _, ok := s.runMeta(r, id); !ok {
+	meta, ok := s.runMeta(r, id)
+	if !ok {
 		writeError(w, http.StatusNotFound, "unknown run")
+		return nil, false
+	}
+	if !s.canControl(r, meta.User) {
+		writeError(w, http.StatusForbidden, "you may only view this run")
 		return nil, false
 	}
 	if run := s.exec.Get(id); run != nil && run.Result().Status == executor.StatusRunning {

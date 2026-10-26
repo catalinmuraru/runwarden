@@ -52,8 +52,12 @@ func TestRunningAndAdmin(t *testing.T) {
 	done := alice.start("Echo", map[string]any{"Name": "x"})
 	alice.finish(done)
 
-	if got := ids(alice.runs("?status=running")); len(got) != 1 || got[0] != a {
-		t.Errorf("alice running = %q, want only her run", got)
+	// alice may view Sleep, so she sees bob's run too; erin may not.
+	if got := ids(alice.runs("?status=running")); len(got) != 2 || got[0] != b || got[1] != a {
+		t.Errorf("alice running = %q, want both", got)
+	}
+	if got := alice.as("erin", "").runs("?status=running"); len(got) != 0 {
+		t.Errorf("erin running = %q, want none", ids(got))
 	}
 	if got := ids(root.runs("?status=running")); len(got) != 2 || got[0] != b || got[1] != a {
 		t.Errorf("admin running = %q, want both, newest first", got)
@@ -61,8 +65,11 @@ func TestRunningAndAdmin(t *testing.T) {
 	if got := ids(root.runs("?status=running&user=BOB")); len(got) != 1 || got[0] != b {
 		t.Errorf("admin running for bob = %q", got)
 	}
-	if got := bob.runs("?user=alice"); len(got) != 0 {
-		t.Errorf("bob filtering by alice sees %q", ids(got))
+	if got := ids(bob.runs("?user=alice")); len(got) != 2 || got[0] != done || got[1] != a {
+		t.Errorf("bob filtering by alice sees %q", got)
+	}
+	if code, _ := bob.do(http.MethodPost, "/api/runs/"+a+"/stop", nil); code != http.StatusForbidden {
+		t.Errorf("bob stops alice's run = %d, want 403", code)
 	}
 	if got := ids(root.runs("?user=alice&status=finished")); len(got) != 1 || got[0] != done {
 		t.Errorf("admin finished runs of alice = %q", got)

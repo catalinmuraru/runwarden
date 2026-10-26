@@ -4,7 +4,7 @@
   "working_directory": ".",
   "description": "Restarts a service. Shared options come from an included hidden config.",
   "group": "Maintenance",
-  "allowed_users": ["@ops"],
+  "tags": ["devops"],
   "include": "examples/runners/shared_options.json",
   "parameters": [
     {

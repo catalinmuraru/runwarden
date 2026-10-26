@@ -25,6 +25,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
+	"github.com/catalinmuraru/runwarden/internal/policy"
 )
 
 const testWait = 20 * time.Second
@@ -95,7 +96,7 @@ func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 		opts.MaxUploadBytes = 1 << 20
 	}
 	opts.Authenticate = fakeAuth
-	opts.Policy = authz.Policy{AdminUsers: []string{"root"}}
+	opts.Access = testAccess(t, data)
 	srv := New(opts, ex, hist)
 	srv.SetCatalog(cat)
 	mux := http.NewServeMux()
@@ -109,6 +110,46 @@ func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 		hist.Wait()
 	})
 	return &testEnv{t: t, srv: srv, ts: ts, ex: ex, hist: hist, data: data, user: "alice", groups: "ops"}
+}
+
+// testAccess is the policy of the API tests:
+//   - root: devops (bootstrap list)
+//   - alice: developer + ops, runs everything she needs, Echo also on production
+//   - bob: developer, runs on development, views Echo on production, no tag:ops scripts
+//   - carol: auditor, views the tag:ops scripts and their runs
+//   - erin: intern, Echo on development only
+//   - anyone else: guest
+func testAccess(t *testing.T, data string) *authz.Authorizer {
+	t.Helper()
+	store, err := policy.Open(data, policy.Options{
+		Environments:     []policy.Environment{{Name: "development", Match: []string{"dev*"}}, {Name: "production", Match: []string{"prod*"}}},
+		Bootstrap:        []string{"root"},
+		MaxExceptionDays: 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.Update(1, func(p *policy.Policy) error {
+		p.Roles = append(p.Roles, policy.Role{Name: "ops"}, policy.Role{Name: "auditor"}, policy.Role{Name: "intern"})
+		p.Users = []policy.UserRoles{
+			{Name: "alice", Roles: []string{policy.RoleDeveloper, "ops"}},
+			{Name: "bob", Roles: []string{policy.RoleDeveloper}},
+			{Name: "carol", Roles: []string{"auditor"}},
+			{Name: "erin", Roles: []string{"intern"}},
+		}
+		p.Rules = []policy.Rule{
+			{Role: policy.RoleDeveloper, Scripts: []string{"Echo", "Sleep", "Prompt", "Report"}, Environments: []string{"development", policy.NoEnvironment}, Access: policy.Run},
+			{Role: policy.RoleDeveloper, Scripts: []string{"Echo"}, Environments: []string{"production"}, Access: policy.View},
+			{Role: "ops", Scripts: []string{"tag:ops", "Echo"}, Environments: []string{policy.Any}, Access: policy.Run},
+			{Role: "auditor", Scripts: []string{"tag:ops"}, Environments: []string{policy.Any}, Access: policy.View},
+			{Role: "intern", Scripts: []string{"Echo"}, Environments: []string{"development"}, Access: policy.Run},
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &authz.Authorizer{Store: store}
 }
 
 func (e *testEnv) script(name string) *config.Script {
@@ -236,7 +277,7 @@ func TestScripts(t *testing.T) {
 	if p := byName["Token"]; !p.Secure || !p.HasDefault || p.Default != nil {
 		t.Errorf("token = %+v", p)
 	}
-	if p := byName["Env"]; p.Default != "dev" || !slices.Equal(p.Values, []option{{"dev", "dev"}, {"prod", "Production"}}) {
+	if p := byName["Env"]; p.Default != "dev" || p.Environment != config.EnvTarget || !slices.Equal(p.Values, []option{{"dev", "dev", "development", "run"}, {"prod", "Production", "production", "run"}}) {
 		t.Errorf("env = %+v", p)
 	}
 	if p := byName["Target"]; !p.DynamicValues || !slices.Equal(p.DependsOn, []string{"Env"}) {
