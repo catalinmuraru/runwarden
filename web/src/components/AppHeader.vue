@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { notifications, setNotifications, unavailableReason } from '../lib/notify'
 import { running } from '../lib/running'
 import { session, signOut } from '../session'
-
-const router = useRouter()
 
 const notifyTitle = computed(() => {
   const reason = unavailableReason()
@@ -25,11 +22,7 @@ async function toggleNotifications() {
 
 async function logout() {
   const providerLogout = await signOut()
-  if (providerLogout) {
-    window.location.assign(providerLogout)
-    return
-  }
-  await router.push({ name: 'login' })
+  window.location.assign(providerLogout ?? '/')
 }
 </script>
 
@@ -57,7 +50,7 @@ async function logout() {
         </button>
         <span :title="session.me?.groups.join(', ')">{{ session.me?.name }}</span>
         <span v-if="session.me?.admin" class="badge tone-info">admin</span>
-        <button v-if="session.authType !== 'none'" class="btn btn-quiet" type="button" @click="logout">Sign out</button>
+        <button v-if="session.me?.auth_type !== 'none'" class="btn btn-quiet" type="button" @click="logout">Sign out</button>
       </div>
     </div>
   </header>

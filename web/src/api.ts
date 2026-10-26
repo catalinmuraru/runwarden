@@ -7,6 +7,12 @@ export interface Me {
   auth_type: string
 }
 
+export interface SignInMethod {
+  id: string // gitlab, oidc, ldap or local (built-in administrator)
+  label: string
+  kind: 'redirect' | 'password'
+}
+
 export interface ScriptSummary {
   name: string
   group?: string
@@ -79,6 +85,8 @@ export interface AdminUser {
   runs: number
   running: number
   admin: boolean
+  sessions: number // valid sign-in sessions
+  methods?: string[]
 }
 
 export interface ActivityEvent {
@@ -174,10 +182,10 @@ function query(params: Record<string, string | string[] | undefined>): string {
 }
 
 export const api = {
-  authConfig: () => request<{ type: string }>('GET', '/auth/config'),
+  authConfig: () => request<{ methods: SignInMethod[]; no_auth: boolean }>('GET', '/auth/config'),
   me: () => request<Me>('GET', '/api/me'),
-  loginPassword: (username: string, password: string) =>
-    request<Me>('POST', '/auth/login', { username, password }),
+  loginPassword: (method: string, username: string, password: string) =>
+    request<Me>('POST', '/auth/login', { method, username, password }),
   logout: () => request<{ logout_url?: string }>('POST', '/auth/logout'),
 
   scripts: async () => (await request<{ scripts: ScriptSummary[] }>('GET', '/api/scripts')).scripts,
@@ -197,6 +205,7 @@ export const api = {
   stop: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/stop`),
   kill: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/kill`),
   fileURL: (id: string, name: string) => `/api/runs/${enc(id)}/files/${enc(name)}`,
+  adminSignOut: (name: string) => request<{ revoked: number }>('POST', `/api/admin/users/${enc(name)}/sign-out`),
   adminUsers: async () => (await request<{ users: AdminUser[] }>('GET', '/api/admin/users')).users,
   activity: async (f: ActivityFilter = {}) =>
     (await request<{ events: ActivityEvent[] }>('GET', `/api/admin/activity${query({ ...f, limit: f.limit?.toString() })}`)).events,

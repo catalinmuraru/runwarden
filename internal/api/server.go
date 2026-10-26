@@ -5,7 +5,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +31,8 @@ type Options struct {
 	Policy       authz.Policy
 	// Activity, if set, records who uses the server and serves the admin pages.
 	Activity *activity.Store
+	// Sessions, if set, lets admins see and revoke sign-in sessions.
+	Sessions SessionAdmin
 	// Helper scripts (dropdown values, defaults): concurrent calls per user and in total
 	// (defaults 2 and 10), and how long their output is reused (0: not cached).
 	ValuesMaxPerUser int
@@ -85,21 +86,6 @@ func (s *Server) canSee(r *http.Request, meta history.Meta) bool {
 	return s.opts.Policy.CanSeeRun(currentUser(r), meta.User, s.script(meta.Script))
 }
 
-// ReferencedGroups lists the groups that runner configs and admin settings refer to.
-func (s *Server) ReferencedGroups() []string {
-	groups := append([]string(nil), s.opts.Policy.AdminGroups...)
-	if c := s.catalog.Load(); c != nil {
-		for _, sc := range c.Scripts {
-			for _, e := range append(append([]string(nil), sc.AllowedUsers...), sc.AdminUsers...) {
-				if g, ok := strings.CutPrefix(strings.TrimSpace(e), "@"); ok {
-					groups = append(groups, g)
-				}
-			}
-		}
-	}
-	return groups
-}
-
 func currentUser(r *http.Request) auth.User {
 	u, _ := auth.UserFrom(r.Context())
 	return u
@@ -131,6 +117,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	h("GET /api/runs/{id}/ws", s.runSocket)
 	h("GET /api/admin/users", s.adminOnly(s.adminUsers))
 	h("GET /api/admin/activity", s.adminOnly(s.adminActivity))
+	h("POST /api/admin/users/{name}/sign-out", s.adminOnly(s.adminSignOut))
 	// Unknown API paths get JSON instead of the UI's index page.
 	mux.Handle("GET /api/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
@@ -140,7 +127,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 // record writes an audit event for the requesting user.
 func (s *Server) record(r *http.Request, e audit.Event) {
 	u := currentUser(r)
-	e.User, e.Groups = u.Name, u.Groups
+	e.User, e.Groups, e.AuthMethod = u.Name, u.Groups, u.Method
 	e.SourceIP = s.opts.ClientIP.IP(r)
 	e.UserAgent = r.UserAgent()
 	audit.Log(r.Context(), e)

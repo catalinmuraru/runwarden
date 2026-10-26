@@ -10,15 +10,22 @@ image:
 imagePullSecrets: []
 
 auth:
-  # Required: oidc, gitlab, ldap, or none (local development only: no sign-in).
-  type: ""
-  # Must also be true for type none: everyone who can reach the server becomes an admin.
+  # Sign-in methods offered on the sign-in page, in this order: gitlab, oidc, ldap.
+  # [none] (alone) disables sign-in for local testing and needs allowNoAuth: true.
+  methods: [gitlab]
+  # Must also be true for methods [none]: everyone who can reach the server becomes an admin.
   allowNoAuth: false
+  # Built-in administrator "admin@local" for bootstrapping and emergencies. While true, a new
+  # random password is written at every start to /var/lib/runwarden/initial-admin-password
+  # (read it with kubectl exec ... cat); it is never logged. Set back to false once devops
+  # users exist: the password file is removed and the administrator's sessions end.
+  initialAdmin: false
   # Failed sign-ins allowed per client address (15 minutes) and in total (1 minute) before
   # further attempts are refused, besides 5 per user name and address. 0 = no limit.
   maxFailuresPerIP: 20
   maxFailuresGlobal: 100
-  # External URL, e.g. https://runwarden.example.com (required for oidc and gitlab).
+  # External URL, e.g. https://runwarden.example.com (required for gitlab and oidc; the
+  # provider's redirect URI is <publicUrl>/auth/callback).
   publicUrl: ""
   sessionTTL: 12h
   # true/false; unset means true unless publicUrl is http://.
@@ -32,9 +39,15 @@ auth:
     scopes: ""
     usernameClaim: ""
     groupsClaim: ""
+    label: ""          # sign-in button text, default "Single sign-on"
+    requiredGroup: ""  # only members of this group (or its subgroups) may sign in
   gitlab:
+    # Your GitLab, e.g. https://gitlab.example.com (default https://gitlab.com).
     url: ""
     clientId: ""
+    label: ""          # sign-in button text, default "GitLab"
+    # Only members of this group (full path, subgroups included) may sign in, e.g. company/ops.
+    requiredGroup: ""
   ldap:
     url: ""
     startTLS: false
@@ -47,6 +60,7 @@ auth:
     groupFilter: ""
     groupNameAttr: ""
     userGroupsAttr: ""
+    label: ""          # sign-in button text, default "Directory"
 
 # Name of a Secret, created outside this chart, whose keys become environment variables:
 # SESSION_KEY (required unless auth.type=none), OIDC_CLIENT_SECRET or GITLAB_CLIENT_SECRET,

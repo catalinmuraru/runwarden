@@ -25,6 +25,7 @@ const (
 	Logout         = "logout"
 	ConfigReload   = "config-reload"
 	HistoryCleanup = "history-cleanup"
+	SessionRevoke  = "session-revoke"
 )
 
 // Event is one audited action.
@@ -36,10 +37,11 @@ type Event struct {
 	Reason   string // why it failed, or how a run ended
 	Message  string
 
-	User      string
-	Groups    []string
-	SourceIP  string
-	UserAgent string
+	User       string
+	Groups     []string
+	AuthMethod string // how the user signed in: gitlab, oidc, ldap or local
+	SourceIP   string
+	UserAgent  string
 
 	RunID    string
 	Script   string
@@ -122,6 +124,9 @@ func Log(ctx context.Context, e Event) {
 	if e.Count > 0 {
 		custom = append(custom, slog.Int("count", e.Count))
 	}
+	if e.AuthMethod != "" {
+		custom = append(custom, slog.Group("auth", slog.String("method", e.AuthMethod)))
+	}
 	if len(custom) > 0 {
 		attrs = append(attrs, slog.Group("runwarden", custom...))
 	}
@@ -135,7 +140,7 @@ func Log(ctx context.Context, e Event) {
 	if fn := sink.Load(); fn != nil {
 		(*fn)(Record{
 			Time: time.Now().UTC(), Action: e.Action, Outcome: outcome, Reason: e.Reason, Message: msg,
-			User: e.User, Groups: e.Groups, SourceIP: e.SourceIP, UserAgent: e.UserAgent,
+			User: e.User, Groups: e.Groups, AuthMethod: e.AuthMethod, SourceIP: e.SourceIP, UserAgent: e.UserAgent,
 			RunID: e.RunID, Script: e.Script, Status: e.Status, Values: e.Values, Args: e.Args,
 			ExitCode: e.ExitCode, DurationMS: e.Duration.Milliseconds(), Count: e.Count,
 		})
@@ -151,6 +156,7 @@ type Record struct {
 	Message    string         `json:"message,omitempty"`
 	User       string         `json:"user,omitempty"`
 	Groups     []string       `json:"groups,omitempty"`
+	AuthMethod string         `json:"auth_method,omitempty"`
 	SourceIP   string         `json:"source_ip,omitempty"`
 	UserAgent  string         `json:"user_agent,omitempty"`
 	RunID      string         `json:"run_id,omitempty"`

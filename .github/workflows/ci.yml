@@ -80,20 +80,23 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
-      - run: helm lint --strict deploy/helm/runwarden --set auth.type=none,auth.allowNoAuth=true
+      - run: helm lint --strict deploy/helm/runwarden --set 'auth.methods={none}',auth.allowNoAuth=true
       - name: Render with representative values
         run: |
           helm template t deploy/helm/runwarden -f deploy/kind/values-kind.yaml >/dev/null
-          helm template t deploy/helm/runwarden --set auth.type=oidc,existingSecret=s \
+          helm template t deploy/helm/runwarden --set 'auth.methods={oidc}',existingSecret=s \
             --set auth.publicUrl=https://rw.example.com,auth.oidc.issuerUrl=https://idp,auth.oidc.clientId=rw \
             --set ingress.enabled=true,ingress.host=rw.example.com >/dev/null
-          helm template t deploy/helm/runwarden --set auth.type=ldap,existingSecret=s \
+          helm template t deploy/helm/runwarden --set 'auth.methods={ldap}',existingSecret=s,auth.initialAdmin=true \
             --set auth.ldap.url=ldaps://dir,auth.ldap.userBaseDN=dc=example \
             --set-json 'runners.configs={"hello":{"name":"Hello","script_path":"/bin/echo"}}' >/dev/null
-          helm template t deploy/helm/runwarden --set auth.type=gitlab,existingSecret=s,auth.publicUrl=https://rw.example.com \
+          helm template t deploy/helm/runwarden --set existingSecret=s,auth.publicUrl=https://rw.example.com \
             --set auth.gitlab.clientId=rw,networkPolicy.enabled=true,runs.homeSkeletonConfigMap=skel >/dev/null
-          # auth.type=none must be confirmed with auth.allowNoAuth
-          if helm template t deploy/helm/runwarden --set auth.type=none >/dev/null 2>&1; then exit 1; fi
+          helm template t deploy/helm/runwarden --set 'auth.methods={gitlab,ldap}',existingSecret=s,auth.publicUrl=https://rw.example.com \
+            --set auth.gitlab.clientId=rw,auth.ldap.url=ldaps://dir,auth.ldap.userBaseDN=dc=example >/dev/null
+          # [none] must be confirmed with auth.allowNoAuth; the old auth.type is refused with a hint
+          if helm template t deploy/helm/runwarden --set 'auth.methods={none}' >/dev/null 2>&1; then exit 1; fi
+          if helm template t deploy/helm/runwarden --set auth.type=gitlab,existingSecret=s >/dev/null 2>&1; then exit 1; fi
 
   docker:
     name: Docker build
@@ -134,7 +137,7 @@ jobs:
       - name: Scan Dockerfiles and Helm chart for misconfigurations
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
-          TRIVY_HELM_SET: auth.type=none,auth.allowNoAuth=true,networkPolicy.enabled=true # the chart needs an auth type to render
+          TRIVY_HELM_SET: auth.methods={none},auth.allowNoAuth=true,networkPolicy.enabled=true # the chart needs sign-in settings to render
         with:
           scan-type: config
           scan-ref: .

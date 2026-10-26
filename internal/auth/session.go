@@ -15,16 +15,14 @@ const (
 	sessionCookie = "runwarden_session"
 	loginCookie   = "runwarden_login"
 	loginTTL      = 10 * time.Minute
-	maxCookieLen  = 3500 // stay well below the 4 KB browsers accept
 )
 
-var (
-	errCookieTooLarge = errors.New("session cookie too large")
-	errBadCookie      = errors.New("invalid or expired cookie")
-)
+var errBadCookie = errors.New("invalid or expired cookie")
 
-// Sessions seals cookie contents with AES-256-GCM: they can be neither read nor forged without
-// the key. The cookie name is bound as additional data, so one cookie can't stand in for another.
+// Sessions handles the cookies: the session cookie holds only the token of a server-side
+// session (see Store); the short-lived login-state cookie is sealed with AES-256-GCM, so it can
+// be neither read nor forged without the key. The cookie name is bound as additional data, so
+// one cookie can't stand in for another.
 type Sessions struct {
 	aead   cipher.AEAD
 	ttl    time.Duration
@@ -48,17 +46,13 @@ func NewSessions(key []byte, ttl time.Duration, secure bool) (*Sessions, error) 
 	return &Sessions{aead: aead, ttl: ttl, secure: secure, now: time.Now}, nil
 }
 
-type sessionData struct {
-	User
-	Exp int64 `json:"exp"`
-}
-
 // loginState travels through the provider round trip in its own short-lived cookie.
 type loginState struct {
 	State    string `json:"state"`
 	Nonce    string `json:"nonce"`
 	Verifier string `json:"verifier"`
 	Next     string `json:"next"`
+	Method   string `json:"method"` // the sign-in method that started the round trip
 	Exp      int64  `json:"exp"`
 }
 
@@ -100,33 +94,21 @@ func (s *Sessions) cookie(name, value, path string, maxAge time.Duration) *http.
 	}
 }
 
-// Set signs u in. It fails with errCookieTooLarge when u has too many groups to fit.
-func (s *Sessions) Set(w http.ResponseWriter, u User) error {
-	value, err := s.seal(sessionCookie, sessionData{User: u, Exp: s.now().Add(s.ttl).Unix()})
-	if err != nil {
-		return err
-	}
-	if len(value) > maxCookieLen {
-		return errCookieTooLarge
-	}
-	http.SetCookie(w, s.cookie(sessionCookie, value, "/", s.ttl))
-	return nil
+// setToken sets the session cookie.
+func (s *Sessions) setToken(w http.ResponseWriter, token string) {
+	http.SetCookie(w, s.cookie(sessionCookie, token, "/", s.ttl))
 }
 
-// Get returns the signed-in user, if the session cookie is valid and not expired.
-func (s *Sessions) Get(r *http.Request) (User, bool) {
+// token returns the session token sent by the browser, if any.
+func token(r *http.Request) string {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return User{}, false
+		return ""
 	}
-	var d sessionData
-	if err := s.open(sessionCookie, c.Value, &d); err != nil || d.Name == "" || s.now().Unix() >= d.Exp {
-		return User{}, false
-	}
-	return d.User, true
+	return c.Value
 }
 
-// Clear signs the user out.
+// Clear removes the session cookie.
 func (s *Sessions) Clear(w http.ResponseWriter) {
 	http.SetCookie(w, s.cookie(sessionCookie, "", "/", -time.Second))
 }

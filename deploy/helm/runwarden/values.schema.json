@@ -14,8 +14,13 @@
     "auth": {
       "type": "object",
       "properties": {
-        "type": { "enum": ["", "oidc", "gitlab", "ldap", "none"] },
+        "methods": {
+          "type": "array",
+          "items": { "enum": ["gitlab", "oidc", "ldap", "none"] },
+          "uniqueItems": true
+        },
         "allowNoAuth": { "type": "boolean" },
+        "initialAdmin": { "type": "boolean" },
         "maxFailuresPerIP": { "type": "integer", "minimum": 0 },
         "maxFailuresGlobal": { "type": "integer", "minimum": 0 },
         "publicUrl": { "type": "string" },

@@ -72,3 +72,13 @@ func TestPolicy(t *testing.T) {
 		t.Error("Everyone policy must make every user an admin")
 	}
 }
+
+func TestBuiltInAdmin(t *testing.T) {
+	p := Policy{}
+	if !p.IsAdmin(auth.User{Name: auth.LocalAdminName, Method: auth.MethodLocal}) {
+		t.Error("built-in administrator is not an admin")
+	}
+	if p.IsAdmin(auth.User{Name: auth.LocalAdminName, Method: "oidc"}) {
+		t.Error("the reserved name must not make another method's user an admin")
+	}
+}

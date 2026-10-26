@@ -3,6 +3,7 @@ package web
 
 import (
 	"embed"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"path"
@@ -27,38 +28,86 @@ var staticExt = map[string]bool{
 	".woff": true, ".woff2": true, ".ttf": true, ".wasm": true,
 }
 
-// Handler serves the built UI, or 503 with a hint if the UI was not built.
-func Handler() http.Handler {
+// Handler serves the built UI, or 503 with a hint if the UI was not built. signedIn tells
+// whether a request has a valid session: signed-out visitors get only the sign-in page and the
+// assets it needs.
+func Handler(signedIn func(*http.Request) bool) http.Handler {
 	root, err := fs.Sub(dist, "dist")
 	if err != nil {
 		panic(err) // unreachable: dist is embedded above
 	}
-	return handlerFor(root)
+	return handlerFor(root, signedIn)
+}
+
+// publicAssets lists the files the sign-in page needs, from the Vite manifest: the login.html
+// entry, its imports (recursively) and their CSS.
+func publicAssets(root fs.FS) map[string]bool {
+	public := map[string]bool{"login.html": true}
+	data, err := fs.ReadFile(root, ".vite/manifest.json")
+	if err != nil {
+		return public
+	}
+	var manifest map[string]struct {
+		File    string   `json:"file"`
+		CSS     []string `json:"css"`
+		Assets  []string `json:"assets"`
+		Imports []string `json:"imports"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return public
+	}
+	seen := map[string]bool{}
+	var walk func(key string)
+	walk = func(key string) {
+		chunk, ok := manifest[key]
+		if !ok || seen[key] {
+			return
+		}
+		seen[key] = true
+		public[chunk.File] = true
+		for _, f := range append(append([]string(nil), chunk.CSS...), chunk.Assets...) {
+			public[f] = true
+		}
+		for _, imp := range chunk.Imports {
+			walk(imp)
+		}
+	}
+	walk("login.html")
+	return public
 }
 
 // handlerFor serves a single-page app from root: existing files as they are (hashed assets
-// cached for a year), any other page path as index.html so deep links work.
-func handlerFor(root fs.FS) http.Handler {
+// cached for a year), any other page path as index.html so deep links work. Without a session,
+// pages are login.html and only its assets are served.
+func handlerFor(root fs.FS, signedIn func(*http.Request) bool) http.Handler {
 	if _, err := fs.Stat(root, "index.html"); err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "UI not built: run `npm ci && npm run build` in web/", http.StatusServiceUnavailable)
 		})
 	}
+	public := publicAssets(root)
+	_, err := fs.Stat(root, "login.html")
+	hasLogin := err == nil
 	files := http.FileServerFS(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", contentSecurityPolicy)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
+		signed := signedIn == nil || signedIn(r)
 
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 		switch {
 		case name == "" || name == "index.html":
-		case strings.HasPrefix(path.Base(name), "."), strings.HasPrefix(name, "api/"), strings.HasPrefix(name, "auth/"):
+		case strings.HasPrefix(name, ".") || strings.Contains(name, "/."), strings.HasPrefix(name, "api/"), strings.HasPrefix(name, "auth/"):
 			http.NotFound(w, r)
 			return
 		default:
 			if info, err := fs.Stat(root, name); err == nil && !info.IsDir() {
+				if !signed && !public[name] {
+					http.NotFound(w, r) // the app's code is for signed-in users only
+					return
+				}
 				if strings.HasPrefix(name, "assets/") {
 					h.Set("Cache-Control", "public, max-age=31536000, immutable")
 				}
@@ -70,7 +119,16 @@ func handlerFor(root fs.FS) http.Handler {
 				return
 			}
 		}
-		h.Set("Cache-Control", "no-cache")
-		http.ServeFileFS(w, r, root, "index.html")
+		// The same URL is the app or the sign-in page depending on the session: never cache.
+		h.Set("Cache-Control", "no-store")
+		h.Set("Vary", "Cookie")
+		switch {
+		case signed:
+			http.ServeFileFS(w, r, root, "index.html")
+		case hasLogin:
+			http.ServeFileFS(w, r, root, "login.html")
+		default:
+			http.Error(w, "Sign-in page missing from the UI build.", http.StatusServiceUnavailable)
+		}
 	})
 }

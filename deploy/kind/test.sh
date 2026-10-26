@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the images, deploys the Helm chart into a local kind cluster and checks that Runwarden
 # works there: scripts run, output streams over WebSocket, the security context is enforced and
-# history survives a pod restart. KEEP=1 leaves the release and cluster running.
+# history survives a pod restart, and the built-in administrator works. KEEP=1 leaves the release and cluster running.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -27,6 +27,7 @@ kind load docker-image runwarden-examples:dev --name "$CLUSTER"
 step "Install"
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n "$NS" create secret generic runwarden-env --from-literal=RUNNER_ENV_GREETING=hello \
+  --from-literal=SESSION_KEY="$(openssl rand -base64 32)" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 helm upgrade --install runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 3m
 kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m
@@ -137,6 +138,32 @@ curl -fs "$B/api/admin/activity?action=run-end" | jq -e --arg id "$ID" '[.events
   || fail "activity log lost after restart"
 curl -fs "$B/api/admin/users" | jq -e '.users | length > 0' >/dev/null || fail "users index lost after restart"
 echo "activity log and users index survive the restart"
+
+step "Built-in administrator"
+upgrade() {
+  helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml "$@" --wait --timeout 3m >/dev/null
+  kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m >/dev/null
+  forward
+}
+upgrade --set-json 'auth.methods=[]' --set auth.initialAdmin=true,auth.cookieSecure=false
+JAR=$(mktemp)
+code=$(curl -s -o /dev/null -w '%{http_code}' "$B/api/scripts")
+[ "$code" = "401" ] || fail "API without a session answered $code"
+curl -fs "$B/runs/x" | grep -q '<title>Sign in' || fail "signed-out page is not the sign-in page"
+pw=$(kubectl -n "$NS" exec deploy/runwarden -- cat /var/lib/runwarden/initial-admin-password)
+[ "${#pw}" -ge 40 ] || fail "password file missing or short"
+if kubectl -n "$NS" logs deploy/runwarden | grep -qF "$pw"; then fail "password in the pod log"; fi
+curl -fs -c "$JAR" -X POST "$B/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"method\":\"local\",\"password\":\"$pw\"}" >/dev/null || fail "built-in admin sign-in failed"
+curl -fs -b "$JAR" "$B/api/me" | jq -e '.name == "admin@local" and .admin' >/dev/null || fail "not signed in as admin@local"
+echo "password only in the file (not in the log); admin@local signed in"
+upgrade --set-json 'auth.methods=["ldap"]' --set auth.ldap.url=ldaps://ldap.invalid,auth.ldap.userBaseDN=dc=example,auth.cookieSecure=false
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$B/api/me")
+[ "$code" = "401" ] || fail "built-in admin session still valid after disabling ($code)"
+kubectl -n "$NS" exec deploy/runwarden -- test ! -e /var/lib/runwarden/initial-admin-password || fail "password file not removed"
+rm -f "$JAR"
+upgrade
+echo "disabled: password file removed, admin session refused"
 
 echo
 echo "PASS: Runwarden runs in kind"

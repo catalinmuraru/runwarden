@@ -1,5 +1,5 @@
-// Package auth signs users in (OIDC, GitLab or LDAP), keeps them signed in with encrypted
-// session cookies, and attaches the user to API requests.
+// Package auth signs users in (GitLab, OIDC, LDAP or the built-in administrator), keeps them
+// signed in with server-side sessions, and attaches the user to API requests.
 package auth
 
 import (
@@ -11,6 +11,7 @@ import (
 type User struct {
 	Name   string   `json:"name"`
 	Groups []string `json:"groups,omitempty"`
+	Method string   `json:"method,omitempty"` // sign-in method: gitlab, oidc, ldap or local
 }
 
 // Anonymous is the user when authentication is disabled (AUTH_TYPE=none).

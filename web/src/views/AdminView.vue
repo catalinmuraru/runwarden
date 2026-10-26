@@ -7,7 +7,8 @@ import { formatDateTime } from '../lib/format'
 const route = useRoute()
 const router = useRouter()
 
-const actions = ['run-start', 'run-end', 'run-input', 'run-stop', 'run-kill', 'login', 'logout', 'config-reload', 'history-cleanup']
+const actions = ['run-start', 'run-end', 'run-input', 'run-stop', 'run-kill', 'login', 'logout', 'session-revoke', 'config-reload', 'history-cleanup']
+const methodLabels: Record<string, string> = { gitlab: 'GitLab', oidc: 'SSO', ldap: 'LDAP', local: 'built-in' }
 const userStatus: Record<AdminUser['status'], { text: string; tone: string }> = {
   active: { text: 'Active now', tone: 'ok' },
   'signed-in': { text: 'Signed in', tone: 'info' },
@@ -58,6 +59,17 @@ async function load() {
   }
 }
 
+async function signOutEverywhere(name: string) {
+  if (!confirm(`Sign ${name} out of every browser? They can sign in again unless their account is blocked at the identity provider.`)) return
+  error.value = ''
+  try {
+    await api.adminSignOut(name)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+  await load()
+}
+
 function details(e: ActivityEvent): string {
   const parts: string[] = []
   if (e.status) parts.push(e.status)
@@ -98,6 +110,7 @@ watch(() => route.query, load, { immediate: true })
             <th scope="col">Last sign-in</th>
             <th scope="col">Address</th>
             <th scope="col">Runs</th>
+            <th scope="col">Sessions</th>
           </tr>
         </thead>
         <tbody>
@@ -115,6 +128,14 @@ watch(() => route.query, load, { immediate: true })
               <RouterLink :to="{ name: 'runs', query: { user: u.name } }">{{ u.runs }}</RouterLink>
               <RouterLink v-if="u.running" :to="{ name: 'running' }" class="muted"> ({{ u.running }} running)</RouterLink>
               · <a href="#" @click.prevent="userActivity(u.name)">activity</a>
+            </td>
+            <td>
+              <template v-if="u.sessions">
+                {{ u.sessions }}
+                <span class="muted small">({{ (u.methods ?? []).map((m) => methodLabels[m] ?? m).join(', ') }})</span>
+                <button class="btn btn-quiet small" type="button" @click="signOutEverywhere(u.name)">Sign out everywhere</button>
+              </template>
+              <span v-else class="muted">—</span>
             </td>
           </tr>
         </tbody>

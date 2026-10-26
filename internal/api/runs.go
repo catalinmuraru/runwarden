@@ -103,7 +103,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	// The end event is written when the run is over, possibly long after this request: capture
 	// who started it now.
 	end := audit.Event{Action: audit.RunEnd, Category: "process", Type: "end", RunID: run.ID, Script: sc.Name,
-		User: user.Name, Groups: user.Groups, SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(),
+		User: user.Name, Groups: user.Groups, AuthMethod: user.Method, SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(),
 		Values: masked, Args: run.MaskedArgs}
 	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Terminal: run.Terminal}
 	files := history.OutputFiles{Patterns: sc.OutputFiles, Dir: sc.WorkingDirectory}

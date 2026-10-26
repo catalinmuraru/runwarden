@@ -4,7 +4,7 @@ image:
   tag: dev
   pullPolicy: Never
 auth:
-  type: none
+  methods: [none]
   allowNoAuth: true
 existingSecret: runwarden-env
 limits:

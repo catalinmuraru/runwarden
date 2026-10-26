@@ -22,6 +22,9 @@ func (p Policy) IsAdmin(u auth.User) bool {
 	if p.Everyone {
 		return true
 	}
+	if u.Method == auth.MethodLocal && u.Name == auth.LocalAdminName {
+		return true // the built-in administrator (INITIAL_ADMIN)
+	}
 	return containsFold(p.AdminUsers, u.Name) || anyFold(p.AdminGroups, u.Groups)
 }
 

@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { setUnauthorizedHandler } from './api'
-import { loadSession, session } from './session'
+import { loadSession, session, sessionEnded } from './session'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -11,17 +11,14 @@ export const router = createRouter({
     { path: '/runs', name: 'runs', component: () => import('./views/RunsView.vue'), meta: { title: 'History' } },
     { path: '/runs/:id', name: 'run', component: () => import('./views/RunView.vue'), props: true },
     { path: '/admin', name: 'admin', component: () => import('./views/AdminView.vue'), meta: { title: 'Admin', admin: true } },
-    { path: '/login', name: 'login', component: () => import('./views/LoginView.vue'), meta: { public: true, title: 'Sign in' } },
     { path: '/:rest(.*)', name: 'not-found', component: () => import('./views/NotFoundView.vue'), meta: { title: 'Not found' } },
   ],
 })
 
 router.beforeEach(async (to) => {
   if (!session.loaded) await loadSession()
-  if (!to.meta.public && !session.me) {
-    return { name: 'login', query: { next: to.fullPath } }
-  }
-  if (to.meta.admin && !session.me?.admin) {
+  if (!session.me) return false // reloading to the sign-in page
+  if (to.meta.admin && !session.me.admin) {
     return { name: 'not-found', params: { rest: to.path.slice(1) } }
   }
 })
@@ -32,8 +29,5 @@ router.afterEach((to) => {
 })
 
 setUnauthorizedHandler(() => {
-  if (!session.me) return
-  session.me = null
-  const current = router.currentRoute.value
-  if (!current.meta.public) void router.push({ name: 'login', query: { next: current.fullPath } })
+  if (session.me) sessionEnded()
 })

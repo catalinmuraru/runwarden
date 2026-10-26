@@ -253,42 +253,73 @@ is written to. Search the audit trail in Kibana with `event.dataset : "runwarden
 
 ## Authentication and authorization
 
-`AUTH_TYPE` selects how users sign in; the server refuses to start without it.
+`AUTH_METHODS` lists the sign-in methods, in the order the sign-in page shows them; the server
+refuses to start without one. Several can be enabled at once (e.g. `gitlab,ldap`).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AUTH_TYPE` | **required** | `oidc`, `gitlab`, `ldap`, or `none` (local development only: no sign-in, everyone is an admin; also needs `ALLOW_NO_AUTH=true`) |
-| `PUBLIC_URL` | – | external URL, e.g. `https://runwarden.example.com` (oidc, gitlab); the callback is `PUBLIC_URL/auth/callback` |
+| `AUTH_METHODS` | **required** | `gitlab`, `oidc`, `ldap` (comma-separated), or `none` alone for local development (no sign-in, everyone is an admin; also needs `ALLOW_NO_AUTH=true`). `AUTH_TYPE` (one method) is still read, with a deprecation warning |
+| `INITIAL_ADMIN` | `false` | built-in administrator `admin@local`, see below |
+| `PUBLIC_URL` | – | external URL, e.g. `https://runwarden.example.com` (gitlab, oidc); the redirect URI to register is `PUBLIC_URL/auth/callback` for every provider |
 | `SESSION_KEY` | – | 32 random bytes, base64 (`openssl rand -base64 32`); required unless `none` |
 | `SESSION_TTL` | `12h` | how long a sign-in lasts |
 | `COOKIE_SECURE` | `true` (`false` if `PUBLIC_URL` is `http://`) | `Secure` flag on cookies |
 | `ADMIN_USERS`, `ADMIN_GROUPS` | – | global admins, comma-separated |
+| `GITLAB_URL`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | `https://gitlab.com` | GitLab application (scopes `openid profile email`); user name from `nickname`, groups (full paths) from `groups`, falling back to `groups_direct` |
+| `GITLAB_REQUIRED_GROUP` | – | only members of this group or its subgroups (full path, e.g. `company/ops`) may sign in |
+| `GITLAB_LABEL` | `GitLab` | button text on the sign-in page |
 | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | – | OpenID Connect client (confidential, authorization code flow) |
 | `OIDC_SCOPES` | `openid profile email` | extra scopes, space-separated (e.g. `groups`) |
 | `OIDC_USERNAME_CLAIM`, `OIDC_GROUPS_CLAIM` | `preferred_username`, `groups` | claims read from the ID token, then userinfo |
-| `GITLAB_URL`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | `https://gitlab.com` | GitLab application (scopes `openid profile email`); user name from `nickname`, groups (full paths) from `groups`, falling back to `groups_direct` |
+| `OIDC_REQUIRED_GROUP`, `OIDC_LABEL` | –, `Single sign-on` | as for GitLab |
 | `LDAP_URL` | – | `ldaps://host:636` or `ldap://host:389` with `LDAP_START_TLS=true`; plain `ldap://` is refused unless `LDAP_INSECURE=true` (local testing) |
 | `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD` | – | service account used to find users |
 | `LDAP_USER_BASE_DN`, `LDAP_USER_FILTER` | –, `(uid={username})` | where and how to find a user |
 | `LDAP_GROUP_BASE_DN`, `LDAP_GROUP_FILTER`, `LDAP_GROUP_NAME_ATTR` | –, `(member={dn})`, `cn` | group search |
 | `LDAP_USER_GROUPS_ATTR` | – | instead of a group search, read group DNs from this user attribute (e.g. `memberOf`) |
+| `LDAP_LABEL` | `Directory` | button text on the sign-in page |
 
 Sign-in:
 
-- OIDC and GitLab: `GET /auth/login?next=/path` redirects to the provider (authorization code flow
-  with PKCE, nonce and state checks); the provider returns to `/auth/callback`.
-- LDAP: `POST /auth/login` with `{"username": "...", "password": "..."}`. After 5 failed attempts
-  for a user name from one address, further attempts are refused for 15 minutes.
+- **Without a session, the web port offers only the sign-in page**: every page path shows it,
+  only the files it needs are served (the app's code is not), and the API answers `401`. The
+  page lists the enabled methods; the visitor picks one, then is sent to the provider (GitLab,
+  OIDC) or gets a user name and password form (LDAP, built-in administrator). After signing in
+  they return to the page they asked for. Provider errors (refused, not in the required group,
+  expired) come back to the sign-in page as `?sign_in_error=` and are explained there.
+- API: `GET /auth/config` lists the methods (`{"methods": [{"id", "label", "kind"}]}`);
+  `GET /auth/login?method=gitlab&next=/path` starts a provider sign-in (authorization code flow
+  with PKCE, nonce and state checks; the provider returns to `/auth/callback`);
+  `POST /auth/login` with `{"method": "ldap", "username": "...", "password": "..."}` signs in
+  with a password. After 5 failed attempts for a user name from one address, further attempts
+  are refused for 15 minutes.
 - Flood protection (all methods): after `LOGIN_MAX_FAILURES_PER_IP` (20) failed sign-ins from one
   address in 15 minutes, or `LOGIN_MAX_FAILURES_GLOBAL` (100) from everywhere in one minute,
   sign-ins are refused with `429` without asking the directory. Only the first refusal per
   address and window is audited, and once a day's activity-log file reaches
   `ACTIVITY_MAX_DAY_BYTES` (50Mi) failed sign-ins are kept only in the application log.
 - `GET /api/me` returns the signed-in user; `POST /auth/logout` signs out (and returns the
-  provider's logout URL when there is one).
+  provider's logout URL when there is one). Audit events record the method as
+  `runwarden.auth.method`.
 
-Sessions are encrypted cookies (AES-256-GCM, `HttpOnly`, `SameSite=Lax`). API requests without a
-session get `401`; state-changing requests from other sites are refused with `403`.
+**Sessions** are kept on the server (`DATA_DIR/sessions.json`, stored as hashes of the cookie
+tokens, so the file cannot be used to sign in) and survive restarts. The cookie holds only a
+random token (`HttpOnly`, `Secure`, `SameSite=Lax`). Signing out ends the session on the server,
+so a copied cookie stops working; admins can sign a user out of every browser from the Admin
+page ("Sign out everywhere", audited as `session-revoke`). API requests without a session get
+`401`; state-changing requests from other sites are refused with `403`.
+
+**Built-in administrator** (`INITIAL_ADMIN=true`, Helm `auth.initialAdmin`), for setting up the
+first admins and for emergencies:
+
+- the sign-in page offers "Administrator"; the account is `admin@local` (no other method may use
+  that name) and is a global admin;
+- at every start a new random password is written to `DATA_DIR/initial-admin-password` (mode
+  0600). It is never logged; the log names only the file:
+  `kubectl exec deploy/runwarden -- cat /var/lib/runwarden/initial-admin-password`;
+- set `INITIAL_ADMIN=false` (or remove it) when real admins can sign in: the file is deleted,
+  the method disappears and every session of the built-in administrator ends;
+- it may be the only method (`AUTH_METHODS` empty) to bootstrap a new installation.
 
 Who may do what, from each runner config:
 
@@ -310,10 +341,10 @@ OpenLDAP (`ldap://localhost:1389`) with test users `alice` (group `ops`) and `bo
 
 ```bash
 docker compose -f deploy/dev/compose.yaml up -d
-AUTH_TYPE=oidc PUBLIC_URL=http://localhost:8080 SESSION_KEY=$(openssl rand -base64 32) \
+AUTH_METHODS=oidc PUBLIC_URL=http://localhost:8080 SESSION_KEY=$(openssl rand -base64 32) \
   OIDC_ISSUER_URL=http://localhost:8180/realms/runwarden OIDC_CLIENT_ID=runwarden \
   OIDC_CLIENT_SECRET=dev-client-secret RUNNERS_DIR=examples/runners go run ./cmd/runwarden
-# open http://localhost:8080/auth/login and sign in as alice / alice-password
+# open http://localhost:8080, choose "Single sign-on" and sign in as alice / alice-password
 ```
 
 ## API
@@ -345,8 +376,8 @@ live, the client may send `{"type":"input","line":"..."}`, `{"type":"close_input
 Run statuses: `running`, `finished`, `failed`, `stopped`, `killed`, `timed_out`, and
 `interrupted` (the server stopped while the run was in progress).
 
-The examples below assume `AUTH_TYPE=none`; otherwise sign in first and send the session
-cookie (for LDAP: `curl -c cookies.txt -X POST .../auth/login -d '{"username":..,"password":..}'`,
+The examples below assume `AUTH_METHODS=none`; otherwise sign in first and send the session
+cookie (for LDAP: `curl -c cookies.txt -X POST .../auth/login -d '{"method":"ldap","username":..,"password":..}'`,
 then `-b cookies.txt` on every call).
 
 ```bash
@@ -400,13 +431,13 @@ COPY scripts/ /opt/runwarden/scripts/
 ```bash
 kubectl create secret generic runwarden-env \
   --from-literal=SESSION_KEY="$(openssl rand -base64 32)" \
-  --from-literal=OIDC_CLIENT_SECRET=... \
+  --from-literal=GITLAB_CLIENT_SECRET=... \
   --from-literal=RUNNER_ENV_API_TOKEN=...      # passed to scripts as API_TOKEN
 
-helm install runwarden oci://ghcr.io/catalinmuraru/charts/runwarden --version 0.1.0 \
+helm install runwarden oci://ghcr.io/catalinmuraru/charts/runwarden \
   --set image.repository=registry.example.com/my-scripts --set image.tag=1.0.0 \
-  --set auth.type=oidc --set auth.publicUrl=https://runwarden.example.com \
-  --set auth.oidc.issuerUrl=https://idp.example.com/realms/ops --set auth.oidc.clientId=runwarden \
+  --set auth.publicUrl=https://runwarden.example.com \
+  --set auth.gitlab.url=https://gitlab.example.com --set auth.gitlab.clientId=... \
   --set existingSecret=runwarden-env \
   --set ingress.enabled=true --set ingress.host=runwarden.example.com
 ```
@@ -435,7 +466,9 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
   port, e.g. the ingress controller's namespace), `egress.dns` and `egress.rules` (what scripts may
   reach: GitLab, Azure, the API server...). Plain NetworkPolicy matches IP ranges only; to allow
   hosts by name use your CNI's FQDN policies (Cilium, Calico) or an egress proxy.
-- `auth.type: none` must be confirmed with `auth.allowNoAuth: true`.
+- **Sign-in**: `auth.methods` (default `[gitlab]`; e.g. `[gitlab, ldap]`), `auth.gitlab.url`
+  for your GitLab, `auth.gitlab.requiredGroup`, `auth.initialAdmin`. `[none]` must be confirmed with
+  `auth.allowNoAuth: true`. (`auth.type` was replaced by `auth.methods`; the chart says so.)
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
   (e.g. an SSH key from a Secret).
 
@@ -480,7 +513,7 @@ and Docker plus `kind` for cluster testing.
 cd web && npm ci && npm run build && cd ..
 
 # Run the server on :8080 with the example scripts, without sign-in (local only)
-AUTH_TYPE=none ALLOW_NO_AUTH=true RUNNERS_DIR=examples/runners go run ./cmd/runwarden
+AUTH_METHODS=none ALLOW_NO_AUTH=true RUNNERS_DIR=examples/runners go run ./cmd/runwarden
 
 # UI with hot reload on :5173, proxying /api and /auth to the server above
 cd web && npm run dev
@@ -493,7 +526,7 @@ go test -race ./...
 golangci-lint run
 govulncheck ./...
 cd web && npm ci && npm test && npm run build
-helm lint --strict deploy/helm/runwarden --set auth.type=none,auth.allowNoAuth=true
+helm lint --strict deploy/helm/runwarden --set 'auth.methods={none}',auth.allowNoAuth=true
 docker build -t runwarden .   # CI also scans the image with Trivy
 ```
 

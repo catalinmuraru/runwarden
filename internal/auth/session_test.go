@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,79 +17,65 @@ func testSessions(t *testing.T) *Sessions {
 	return s
 }
 
-// roundTrip sets a session and returns a request carrying the resulting cookie.
-func roundTrip(t *testing.T, s *Sessions, u User) *http.Request {
+func TestSessionCookieAttributes(t *testing.T) {
+	s := testSessions(t)
+	rec := httptest.NewRecorder()
+	s.setToken(rec, "tok")
+	c := rec.Result().Cookies()[0]
+	if c.Name != sessionCookie || c.Value != "tok" || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.MaxAge != 3600 {
+		t.Errorf("cookie attributes: %+v", c)
+	}
+}
+
+// loginRoundTrip sets a login state and returns a request carrying the resulting cookie.
+func loginRoundTrip(t *testing.T, s *Sessions, st loginState) *http.Request {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	if err := s.Set(rec, u); err != nil {
+	if err := s.setLogin(rec, st); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/callback", nil)
 	for _, c := range rec.Result().Cookies() {
 		req.AddCookie(c)
 	}
 	return req
 }
 
-func TestSessionRoundTrip(t *testing.T) {
+func TestLoginStateRejectsTamperingExpiryAndOtherKeys(t *testing.T) {
 	s := testSessions(t)
-	rec := httptest.NewRecorder()
-	if err := s.Set(rec, User{Name: "alice", Groups: []string{"ops"}}); err != nil {
-		t.Fatal(err)
+	req := loginRoundTrip(t, s, loginState{State: "s", Method: "gitlab", Next: "/x"})
+	if st, ok := s.takeLogin(httptest.NewRecorder(), req); !ok || st.Method != "gitlab" || st.Next != "/x" {
+		t.Fatalf("round trip: %+v %v", st, ok)
 	}
-	c := rec.Result().Cookies()[0]
-	if c.Name != sessionCookie || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" {
-		t.Errorf("cookie attributes: %+v", c)
+	c, _ := req.Cookie(loginCookie)
+	if strings.Contains(c.Value, "gitlab") {
+		t.Error("login state is not encrypted")
 	}
-	if strings.Contains(c.Value, "alice") {
-		t.Error("cookie is not encrypted")
-	}
-	u, ok := s.Get(roundTrip(t, s, User{Name: "alice", Groups: []string{"ops"}}))
-	if !ok || u.Name != "alice" || len(u.Groups) != 1 || u.Groups[0] != "ops" {
-		t.Errorf("got %+v %v", u, ok)
-	}
-}
-
-func TestSessionRejectsTamperingExpiryAndOtherKeys(t *testing.T) {
-	s := testSessions(t)
-	req := roundTrip(t, s, User{Name: "alice"})
-	c, _ := req.Cookie(sessionCookie)
 
 	tampered := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	b := []byte(c.Value)
 	b[len(b)/2] ^= 1
-	tampered.AddCookie(&http.Cookie{Name: sessionCookie, Value: string(b)}) //nolint:gosec // test cookie
-	if _, ok := s.Get(tampered); ok {
+	tampered.AddCookie(&http.Cookie{Name: loginCookie, Value: string(b)}) //nolint:gosec // test cookie
+	if _, ok := s.takeLogin(httptest.NewRecorder(), tampered); ok {
 		t.Error("tampered cookie accepted")
 	}
 
 	other, _ := NewSessions([]byte(strings.Repeat("x", 32)), time.Hour, true)
-	if _, ok := other.Get(req); ok {
+	if _, ok := other.takeLogin(httptest.NewRecorder(), req); ok {
 		t.Error("cookie accepted with another key")
 	}
 
-	// A login-state cookie must not work as a session cookie.
+	// A value sealed for another cookie name must not work as login state.
 	swapped := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
-	value, _ := s.seal(loginCookie, sessionData{User: User{Name: "mallory"}, Exp: time.Now().Add(time.Hour).Unix()})
-	swapped.AddCookie(&http.Cookie{Name: sessionCookie, Value: value}) //nolint:gosec // test cookie
-	if _, ok := s.Get(swapped); ok {
+	value, _ := s.seal(sessionCookie, loginState{State: "s", Exp: time.Now().Add(time.Hour).Unix()})
+	swapped.AddCookie(&http.Cookie{Name: loginCookie, Value: value}) //nolint:gosec // test cookie
+	if _, ok := s.takeLogin(httptest.NewRecorder(), swapped); ok {
 		t.Error("cookie sealed for another purpose accepted")
 	}
 
-	s.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
-	if _, ok := s.Get(req); ok {
-		t.Error("expired session accepted")
-	}
-}
-
-func TestSessionTooLarge(t *testing.T) {
-	s := testSessions(t)
-	var groups []string
-	for range 300 {
-		groups = append(groups, strings.Repeat("g", 20))
-	}
-	if err := s.Set(httptest.NewRecorder(), User{Name: "alice", Groups: groups}); !errors.Is(err, errCookieTooLarge) {
-		t.Errorf("err = %v, want errCookieTooLarge", err)
+	s.now = func() time.Time { return time.Now().Add(time.Hour) }
+	if _, ok := s.takeLogin(httptest.NewRecorder(), req); ok {
+		t.Error("expired login state accepted")
 	}
 }
 

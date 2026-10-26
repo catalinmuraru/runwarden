@@ -95,17 +95,16 @@ func run() error {
 	policy := authz.Policy{
 		AdminUsers:  cfg.Auth.AdminUsers,
 		AdminGroups: cfg.Auth.AdminGroups,
-		Everyone:    cfg.Auth.Type == config.AuthNone,
+		Everyone:    cfg.Auth.NoAuth,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var apiSrv *api.Server
-	authH, err := newAuth(ctx, cfg, policy, clientIP, func() []string { return apiSrv.ReferencedGroups() })
+	authH, sessions, err := newAuth(ctx, cfg, policy, clientIP)
 	if err != nil {
 		return err
 	}
-	apiSrv = api.New(api.Options{
+	opts := api.Options{
 		BaseDir:        cfg.BaseDir,
 		DataDir:        cfg.DataDir,
 		MaxUploadBytes: cfg.MaxUploadBytes,
@@ -118,11 +117,22 @@ func run() error {
 		ValuesMaxPerUser: cfg.ValuesMaxPerUser,
 		ValuesMaxGlobal:  cfg.ValuesMaxGlobal,
 		ValuesCacheTTL:   cfg.ValuesCacheTTL,
-	}, ex, hist)
+	}
+	flushers := []flusher{acts}
+	if sessions != nil {
+		opts.Sessions = sessions
+		flushers = append(flushers, sessions)
+		defer func() {
+			if err := sessions.Flush(); err != nil {
+				slog.Error("auth: save sessions", "err", err)
+			}
+		}()
+	}
+	apiSrv := api.New(opts, ex, hist)
 	apiSrv.SetCatalog(cat)
 	go reloadOnHangup(ctx, cfg, apiSrv)
 	go cleanHistory(ctx, cfg, hist, acts)
-	go flushActivity(ctx, acts)
+	go flushEveryMinute(ctx, flushers...)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -170,40 +180,71 @@ func run() error {
 	return nil
 }
 
-// newAuth builds the login handlers for the configured AUTH_TYPE.
-func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, clientIP clientip.Resolver, relevantGroups func() []string) (*auth.Handler, error) {
+// newAuth builds the sign-in handlers for the enabled methods and the built-in administrator.
+// The session store is nil when sign-in is disabled.
+func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, clientIP clientip.Resolver) (*auth.Handler, *auth.Store, error) {
+	for _, w := range cfg.Auth.Warnings {
+		slog.Warn("configuration", "problem", w)
+	}
 	opts := auth.Options{
-		Type:           cfg.Auth.Type,
+		NoAuth:         cfg.Auth.NoAuth,
 		AllowedOrigins: cfg.AllowedOrigins,
 		ClientIP:       clientIP,
 		IsAdmin:        policy.IsAdmin,
-		RelevantGroups: relevantGroups,
 
 		MaxFailuresPerIP:  cfg.Auth.MaxFailuresPerIP,
 		MaxFailuresGlobal: cfg.Auth.MaxFailuresGlobal,
 	}
-	if cfg.Auth.Type == config.AuthNone {
-		slog.Warn("AUTH_TYPE=none: authentication is disabled and every visitor is an admin; use only for local development")
-		return auth.New(opts), nil
+	if cfg.Auth.NoAuth {
+		slog.Warn("AUTH_METHODS=none: authentication is disabled and every visitor is an admin; use only for local development")
+		return auth.New(opts), nil, nil
 	}
 
-	sessions, err := auth.NewSessions(cfg.Auth.SessionKey, cfg.Auth.SessionTTL, cfg.Auth.CookieSecure)
+	cookies, err := auth.NewSessions(cfg.Auth.SessionKey, cfg.Auth.SessionTTL, cfg.Auth.CookieSecure)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	opts.Sessions = sessions
-	switch cfg.Auth.Type {
-	case config.AuthOIDC, config.AuthGitLab:
-		p, err := auth.NewOIDC(ctx, cfg.Auth.OIDC, cfg.Auth.PublicURL+"/auth/callback", cfg.Auth.PublicURL)
-		if err != nil {
-			return nil, err
+	store, err := auth.OpenStore(cfg.DataDir, cfg.Auth.SessionTTL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sessions: %w", err)
+	}
+	opts.Cookies, opts.Store = cookies, store
+	callback := cfg.Auth.PublicURL + "/auth/callback"
+	for _, id := range cfg.Auth.Methods {
+		switch id {
+		case config.AuthGitLab, config.AuthOIDC:
+			oc := cfg.Auth.OIDC
+			if id == config.AuthGitLab {
+				oc = cfg.Auth.GitLab
+			}
+			p, err := auth.NewOIDC(ctx, oc, callback, cfg.Auth.PublicURL)
+			if err != nil {
+				return nil, nil, err
+			}
+			opts.Methods = append(opts.Methods, auth.Method{ID: id, Label: oc.Label, Redirect: p, RequiredGroup: oc.RequiredGroup})
+		case config.AuthLDAP:
+			opts.Methods = append(opts.Methods, auth.Method{ID: id, Label: cfg.Auth.LDAP.Label, Password: auth.NewLDAP(cfg.Auth.LDAP)})
 		}
-		opts.Redirect = p
-	case config.AuthLDAP:
-		opts.Password = auth.NewLDAP(cfg.Auth.LDAP)
 	}
-	slog.Info("authentication enabled", "type", cfg.Auth.Type)
-	return auth.New(opts), nil
+
+	if cfg.Auth.InitialAdmin {
+		admin, path, err := auth.EnableLocalAdmin(cfg.DataDir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("initial admin: %w", err)
+		}
+		opts.Methods = append(opts.Methods, auth.Method{ID: auth.MethodLocal, Label: "Administrator", Password: admin})
+		slog.Warn("initial admin enabled: sign in as the built-in administrator with the password in the file; disable INITIAL_ADMIN once devops users are set up",
+			"user", auth.LocalAdminName, "password_file", path)
+	} else {
+		if err := auth.DisableLocalAdmin(cfg.DataDir); err != nil {
+			return nil, nil, fmt.Errorf("initial admin: %w", err)
+		}
+		if n := store.RevokeWhere(func(u auth.User) bool { return u.Method == auth.MethodLocal }); n > 0 {
+			slog.Info("initial admin disabled: its sessions were ended", "sessions", n)
+		}
+	}
+	slog.Info("authentication enabled", "methods", cfg.Auth.Methods, "initial_admin", cfg.Auth.InitialAdmin)
+	return auth.New(opts), store, nil
 }
 
 // loadCatalog loads the runner configs, logging problems; scripts with errors are left out.
@@ -273,8 +314,11 @@ func cleanHistory(ctx context.Context, cfg config.App, hist *history.Store, acts
 	}
 }
 
-// flushActivity saves the users index every minute.
-func flushActivity(ctx context.Context, acts *activity.Store) {
+// flusher saves state kept in memory (users index, session last-seen times).
+type flusher interface{ Flush() error }
+
+// flushEveryMinute saves the flushers' state every minute.
+func flushEveryMinute(ctx context.Context, fs ...flusher) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for {
@@ -282,8 +326,10 @@ func flushActivity(ctx context.Context, acts *activity.Store) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			if err := acts.Flush(); err != nil {
-				slog.Error("activity: save users", "err", err)
+			for _, f := range fs {
+				if err := f.Flush(); err != nil {
+					slog.Error("save state", "err", err)
+				}
 			}
 		}
 	}
@@ -297,7 +343,7 @@ func newMux(apiSrv *api.Server, authH *auth.Handler) *http.ServeMux {
 		mux.HandleFunc(p, http.NotFound)
 	}
 	apiSrv.Register(mux)
-	mux.Handle("GET /", web.Handler())
+	mux.Handle("GET /", web.Handler(authH.SignedIn))
 	return mux
 }
 
