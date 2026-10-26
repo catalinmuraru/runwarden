@@ -355,3 +355,37 @@ func TestLimiter(t *testing.T) {
 		t.Error("reset did not clear")
 	}
 }
+
+func TestSignInThrottling(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	e := newAuthEnv(t, Options{Type: "ldap", Password: fakePassword{}, MaxFailuresPerIP: 3, MaxFailuresGlobal: 5})
+	login := func(user, addr string) int {
+		body, _ := json.Marshal(credentials{Username: user, Password: "wrong"}) //nolint:gosec // test credentials
+		return e.do(http.MethodPost, "/auth/login", string(body), nil, "RemoteAddr", addr+":4000").StatusCode
+	}
+	// Rotating user names from one address: the per-address limit stops it.
+	for i, want := range []int{401, 401, 401, 429, 429, 429} {
+		if got := login("user"+string(rune('a'+i)), "198.51.100.1"); got != want {
+			t.Errorf("attempt %d from one address = %d, want %d", i+1, got, want)
+		}
+	}
+	refusals := strings.Count(buf.String(), `"reason":"too many failed sign-ins; further refusals`)
+	if refusals != 1 {
+		t.Errorf("throttled refusals audited %d times, want once", refusals)
+	}
+	// Other addresses: two more failures reach the global limit, then everyone is refused.
+	login("x", "198.51.100.2")
+	login("y", "198.51.100.3")
+	if got := login("z", "198.51.100.4"); got != http.StatusTooManyRequests {
+		t.Errorf("after the global limit = %d, want 429", got)
+	}
+	// A correct password is refused too while throttled (no directory call).
+	body, _ := json.Marshal(credentials{Username: "alice", Password: "secret"}) //nolint:gosec // test credentials
+	if got := e.do(http.MethodPost, "/auth/login", string(body), nil, "RemoteAddr", "198.51.100.9:4000").StatusCode; got != http.StatusTooManyRequests {
+		t.Errorf("valid sign-in during the global limit = %d, want 429", got)
+	}
+}

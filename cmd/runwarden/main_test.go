@@ -19,7 +19,13 @@ func get(t *testing.T, h http.Handler, method, path string) int {
 
 func TestProbes(t *testing.T) {
 	apiSrv := api.New(api.Options{}, nil, nil)
-	mux := newMux(apiSrv, auth.New(auth.Options{Type: config.AuthNone}))
+	mux := newHealthMux(apiSrv)
+	public := newMux(apiSrv, auth.New(auth.Options{Type: config.AuthNone}))
+	for _, p := range []string{"/healthz", "/readyz"} {
+		if code := get(t, public, http.MethodGet, p); code != http.StatusNotFound {
+			t.Errorf("GET %s on the main port = %d, want 404", p, code)
+		}
+	}
 
 	if code := get(t, mux, http.MethodGet, "/healthz"); code != http.StatusOK {
 		t.Errorf("GET /healthz = %d, want 200", code)
@@ -34,7 +40,7 @@ func TestProbes(t *testing.T) {
 	if code := get(t, mux, http.MethodPost, "/healthz"); code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /healthz = %d, want 405", code)
 	}
-	if code := get(t, mux, http.MethodGet, "/api/nope"); code != http.StatusNotFound {
+	if code := get(t, public, http.MethodGet, "/api/nope"); code != http.StatusNotFound {
 		t.Errorf("GET /api/nope = %d, want 404", code)
 	}
 }

@@ -8,7 +8,7 @@ for arg in "$@"; do
 done
 
 echo "Environment:"
-env | grep -E '^(PARAM_|STORAGE_TOKEN=|EXECUTION_ID=)' | sort | sed 's/^/  /' || true
+env | grep -E '^(PARAM_|STORAGE_TOKEN=|EXECUTION_ID=|HOME=|KUBECONFIG=)' | sort | sed 's/^/  /' || true
 
 # Stdin stays open for interactive input, so read at most one line and don't wait long.
 if read -r -t 1 line; then

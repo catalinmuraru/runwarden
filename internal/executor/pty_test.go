@@ -76,7 +76,7 @@ func TestPerRunTempDir(t *testing.T) {
 	r := mustStart(t, New(Limits{}, EnvPolicy{TempRoot: root}), Request{Script: testScript(t, "tmpdir.sh")})
 	waitDone(t, r)
 	want := filepath.Join(root, r.ID)
-	if out := outputOf(r); !strings.Contains(out, "tmp="+want+"\n") || !strings.Contains(out, "writable") {
+	if out := outputOf(r); !strings.Contains(out, "tmp="+filepath.Join(want, "tmp")+"\n") || !strings.Contains(out, "writable") {
 		t.Errorf("output:\n%s", out)
 	}
 	if _, err := os.Stat(want); !os.IsNotExist(err) {

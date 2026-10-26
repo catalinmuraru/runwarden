@@ -5,6 +5,7 @@ image:
   pullPolicy: Never
 auth:
   type: none
+  allowNoAuth: true
 existingSecret: runwarden-env
 limits:
   runTimeout: 10m

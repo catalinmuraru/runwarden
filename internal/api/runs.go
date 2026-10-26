@@ -83,6 +83,10 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout})
 	switch {
+	case errors.Is(err, executor.ErrUserBusy):
+		refused("user already has a run in progress")
+		writeError(w, http.StatusTooManyRequests, "you already have a run in progress; wait for it to finish or stop it", s.exec.RunningFor(user.Name)...)
+		return
 	case errors.Is(err, executor.ErrBusy):
 		refused("too many runs in progress")
 		writeError(w, http.StatusTooManyRequests, "too many runs in progress, try again later")

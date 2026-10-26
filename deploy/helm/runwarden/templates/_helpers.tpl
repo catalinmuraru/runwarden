@@ -41,12 +41,26 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (ne $type "none") (not .Values.existingSecret) -}}
 {{- fail "existingSecret is required unless auth.type=none (it must contain SESSION_KEY)" -}}
 {{- end -}}
+{{- if and (eq $type "none") (not $a.allowNoAuth) -}}
+{{- fail "auth.type=none makes every visitor an admin; set auth.allowNoAuth=true as well to confirm (local testing only)" -}}
+{{- end -}}
 {{- $e := dict "AUTH_TYPE" $type -}}
+{{- if eq $type "none" }}{{ $_ := set $e "ALLOW_NO_AUTH" "true" }}{{ end -}}
 {{- $l := .Values.limits -}}
 {{- $_ := set $e "MAX_CONCURRENT_RUNS" (toString $l.maxConcurrentRuns) -}}
 {{- $_ := set $e "RUN_TIMEOUT" (toString $l.runTimeout) -}}
 {{- $_ := set $e "RUN_TIMEOUT_MAX" (toString $l.runTimeoutMax) -}}
 {{- $_ := set $e "KILL_GRACE" (toString $l.killGrace) -}}
+{{- $_ := set $e "MAX_RUNS_PER_USER" (toString $l.maxRunsPerUser) -}}
+{{- $_ := set $e "RUN_HOME" (toString .Values.runs.home) -}}
+{{- if .Values.runs.homeSkeletonConfigMap }}{{ $_ := set $e "HOME_SKELETON" "/etc/runwarden/home-skeleton" }}{{ end -}}
+{{- $_ := set $e "VALUES_MAX_PER_USER" (toString .Values.valueScripts.maxPerUser) -}}
+{{- $_ := set $e "VALUES_MAX_GLOBAL" (toString .Values.valueScripts.maxGlobal) -}}
+{{- $_ := set $e "VALUES_CACHE_TTL" (toString .Values.valueScripts.cacheTTL) -}}
+{{- $_ := set $e "ACTIVITY_MAX_DAY_BYTES" (toString .Values.activity.maxDayBytes) -}}
+{{- $_ := set $e "LOGIN_MAX_FAILURES_PER_IP" (toString $a.maxFailuresPerIP) -}}
+{{- $_ := set $e "LOGIN_MAX_FAILURES_GLOBAL" (toString $a.maxFailuresGlobal) -}}
+{{- $_ := set $e "HEALTH_ADDR" ":8081" -}}
 {{- $_ := set $e "MAX_OUTPUT_BYTES" (toString $l.maxOutputBytes) -}}
 {{- $_ := set $e "MAX_UPLOAD_BYTES" (toString $l.maxUploadBytes) -}}
 {{- $_ := set $e "SESSION_TTL" (toString $a.sessionTTL) -}}
@@ -72,6 +86,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- $_ := set $e "LDAP_URL" (required "auth.ldap.url is required" $a.ldap.url) -}}
 {{- $_ := set $e "LDAP_USER_BASE_DN" (required "auth.ldap.userBaseDN is required" $a.ldap.userBaseDN) -}}
 {{- if $a.ldap.startTLS }}{{ $_ := set $e "LDAP_START_TLS" "true" }}{{ end -}}
+{{- if $a.ldap.insecure }}{{ $_ := set $e "LDAP_INSECURE" "true" }}{{ end -}}
 {{- with $a.ldap.bindDN }}{{ $_ := set $e "LDAP_BIND_DN" . }}{{ end -}}
 {{- with $a.ldap.userFilter }}{{ $_ := set $e "LDAP_USER_FILTER" . }}{{ end -}}
 {{- with $a.ldap.groupBaseDN }}{{ $_ := set $e "LDAP_GROUP_BASE_DN" . }}{{ end -}}

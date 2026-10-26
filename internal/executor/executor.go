@@ -11,8 +11,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/config"
@@ -25,6 +26,7 @@ type Limits struct {
 	Timeout        time.Duration // default 60 minutes
 	KillGrace      time.Duration // default 10 seconds between SIGTERM and SIGKILL
 	MaxOutputBytes int64         // default 10 MiB stored per run
+	MaxPerUser     int           // runs one user may have in progress; 0 means no per-user limit
 }
 
 func (l Limits) withDefaults() Limits {
@@ -54,15 +56,21 @@ type Request struct {
 // ErrBusy is returned when the concurrent run limit is reached.
 var ErrBusy = errors.New("too many runs in progress")
 
+// ErrUserBusy is returned when the user already has Limits.MaxPerUser runs in progress.
+var ErrUserBusy = errors.New("you already have a run in progress")
+
 // Executor starts runs and keeps track of them.
 type Executor struct {
 	limits Limits
 	env    EnvPolicy
 	sem    chan struct{}
 
-	mu   sync.Mutex
-	runs map[string]*Run
-	seq  uint64
+	mu     sync.Mutex
+	runs   map[string]*Run
+	seq    uint64
+	byUser map[string]int // runs in progress (or starting) per lower-case user name
+
+	helperSeq atomic.Uint64 // names helper directories without using run IDs
 }
 
 // New returns an Executor with the given limits and environment policy.
@@ -73,6 +81,7 @@ func New(limits Limits, env EnvPolicy) *Executor {
 		env:    env.withDefaults(),
 		sem:    make(chan struct{}, limits.MaxConcurrent),
 		runs:   map[string]*Run{},
+		byUser: map[string]int{},
 	}
 }
 
@@ -86,19 +95,38 @@ func (e *Executor) Timeout(d time.Duration) time.Duration {
 	return e.limits.Timeout
 }
 
-// Start launches a run. It returns ErrBusy when too many runs are in progress.
+// Start launches a run. It returns ErrBusy when too many runs are in progress and ErrUserBusy
+// when the user already has as many runs as allowed.
 func (e *Executor) Start(req Request) (*Run, error) {
 	if req.Script == nil || len(req.Script.Command) == 0 {
 		return nil, errors.New("executor: no script to run")
 	}
+	user := strings.ToLower(req.User)
+	e.mu.Lock()
+	if e.limits.MaxPerUser > 0 && user != "" && e.byUser[user] >= e.limits.MaxPerUser {
+		e.mu.Unlock()
+		return nil, ErrUserBusy
+	}
+	e.byUser[user]++ // reserved before starting, so concurrent requests cannot both pass
+	e.mu.Unlock()
+	release := func() {
+		e.mu.Lock()
+		if e.byUser[user]--; e.byUser[user] <= 0 {
+			delete(e.byUser, user)
+		}
+		e.mu.Unlock()
+	}
+
 	select {
 	case e.sem <- struct{}{}:
 	default:
+		release()
 		return nil, ErrBusy
 	}
-	r, err := e.start(req)
+	r, err := e.start(req, release)
 	if err != nil {
 		<-e.sem
+		release()
 		return nil, err
 	}
 	go func() {
@@ -111,7 +139,8 @@ func (e *Executor) Start(req Request) (*Run, error) {
 	return r, nil
 }
 
-func (e *Executor) start(req Request) (*Run, error) {
+// start launches the process; onEnd runs when it has ended, before Done is closed.
+func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 	id := e.nextID()
 	s := req.Script
 	inv := params.Build(s.Parameters, req.Values, id)
@@ -123,14 +152,14 @@ func (e *Executor) start(req Request) (*Run, error) {
 	if terminal {
 		fixed["TERM"] = "xterm-256color"
 	}
-	tmpDir := ""
-	if e.env.TempRoot != "" {
-		// A private TMPDIR per run, so concurrent runs don't collide on temporary files.
-		tmpDir = filepath.Join(e.env.TempRoot, id)
-		if err := os.MkdirAll(tmpDir, 0o700); err != nil {
-			return nil, fmt.Errorf("run temp dir: %w", err)
-		}
-		fixed["TMPDIR"] = tmpDir
+	// A private TMPDIR (and HOME) per run, so concurrent runs neither collide on files nor see
+	// each other's credentials and contexts.
+	tmpDir, vars, err := e.env.prepareRunDir(id)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range vars {
+		fixed[k] = v
 	}
 	fail := func(err error) (*Run, error) {
 		if tmpDir != "" {
@@ -154,7 +183,6 @@ func (e *Executor) start(req Request) (*Run, error) {
 	var (
 		outR, child *os.File
 		stdin       io.WriteCloser
-		err         error
 	)
 	if terminal {
 		// One terminal for stdin, stdout and stderr, as when a user runs the script by hand.
@@ -189,6 +217,8 @@ func (e *Executor) start(req Request) (*Run, error) {
 	r := &Run{
 		ID:         id,
 		ScriptName: s.Name,
+		User:       req.User,
+		onEnd:      onEnd,
 		MaskedArgs: append(append([]string(nil), s.Command[1:]...), inv.MaskedArgs...),
 		Terminal:   terminal,
 		grace:      e.limits.KillGrace,
@@ -246,6 +276,19 @@ func (e *Executor) Running() []string {
 	var ids []string
 	for id, r := range e.runs {
 		if r.Result().Status == StatusRunning {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// RunningFor returns the IDs of runs in progress started by user (case-insensitive).
+func (e *Executor) RunningFor(user string) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var ids []string
+	for id, r := range e.runs {
+		if strings.EqualFold(r.User, user) && r.Result().Status == StatusRunning {
 			ids = append(ids, id)
 		}
 	}

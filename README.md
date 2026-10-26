@@ -122,6 +122,20 @@ go run ./cmd/runwarden check-config path/to/runners
   once that text appears in the output.
 - Each run gets a private, empty `TMPDIR`, removed when the run ends, so concurrent runs don't
   collide on temporary files (use `mktemp` / `$TMPDIR` instead of fixed names in `/tmp`).
+- **Private HOME** (`RUN_HOME=per-run`, the default): each run, and each call of a dropdown
+  helper script, also gets its own empty `HOME`, with `KUBECONFIG=$HOME/.kube/config` and
+  `AZURE_CONFIG_DIR=$HOME/.azure`, removed when it ends. A kube context, `az` login or git
+  credentials written by one run never reach another run, e.g. one user working on production
+  while another works on development. Scripts therefore log in per run (`az login`,
+  `az aks get-credentials`); files that must survive go to `$RUNWARDEN_WORKSPACE`. `HOME_SKELETON`
+  is copied into every new HOME (e.g. `.gitconfig`, `.ssh/known_hosts`). `RUN_HOME=shared`
+  keeps one HOME for all runs, for scripts that are not migrated yet. All runs share one user ID,
+  so this separates paths, not processes.
+- **One run per user** (`MAX_RUNS_PER_USER`, default 1, admins included): a second start answers
+  `429` with the ID of the run in progress; other users are not affected.
+- Dropdown helper scripts run at most `VALUES_MAX_PER_USER` (2) at a time per user and
+  `VALUES_MAX_GLOBAL` (10) in total (`429` beyond), and their output is reused for
+  `VALUES_CACHE_TTL` (60 s), so forms stay fast and cannot be used to flood the server.
 - Environment: scripts never inherit Runwarden's environment. They get `PATH`, `HOME`, `LANG`,
   `TZ` (defaults `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
   `LANG=C.UTF-8`), every `RUNNER_ENV_<NAME>` variable as `<NAME>`, `EXECUTION_ID`,
@@ -157,9 +171,20 @@ All settings come from environment variables. Secrets are never read from files.
 | `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
 | `HISTORY_MAX_AGE` | `90d` | remove finished runs and activity-log days older than this (`d` or Go durations; `0` keeps them) |
 | `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |
+| `HEALTH_ADDR` | `:8081` | listener for `/healthz` and `/readyz` (not served on `LISTEN_ADDR`) |
+| `MAX_RUNS_PER_USER` | `1` | runs one user may have in progress (`0`: no limit) |
+| `RUN_HOME` | `per-run` | `per-run`: private HOME per run; `shared`: one HOME for all runs |
+| `HOME_SKELETON` | – | directory copied into every private HOME |
+| `VALUES_MAX_PER_USER`, `VALUES_MAX_GLOBAL` | `2`, `10` | concurrent dropdown helper scripts |
+| `VALUES_CACHE_TTL` | `60s` | reuse helper script output (`0`: no cache) |
+| `ACTIVITY_MAX_DAY_BYTES` | `50Mi` | after this, a day's activity-log file no longer records failed sign-ins |
+| `LOGIN_MAX_FAILURES_PER_IP`, `LOGIN_MAX_FAILURES_GLOBAL` | `20`, `100` | failed sign-ins per address (15 min) and in total (1 min) before refusing (`0`: no limit) |
 
-Send `SIGHUP` to reload runner configs without a restart. `GET /healthz` is liveness;
-`GET /readyz` reports ready once runner configs are loaded.
+`TRUSTED_PROXIES` entries wider than `/8` (IPv4) or `/32` (IPv6) are refused, so a typo cannot let
+every client choose its own address.
+
+Send `SIGHUP` to reload runner configs without a restart. `GET /healthz` (on `HEALTH_ADDR`) is
+liveness; `GET /readyz` reports ready once runner configs are loaded.
 
 ## Logs and audit trail
 
@@ -232,7 +257,7 @@ is written to. Search the audit trail in Kibana with `event.dataset : "runwarden
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AUTH_TYPE` | **required** | `oidc`, `gitlab`, `ldap`, or `none` (local development only: no sign-in, everyone is an admin) |
+| `AUTH_TYPE` | **required** | `oidc`, `gitlab`, `ldap`, or `none` (local development only: no sign-in, everyone is an admin; also needs `ALLOW_NO_AUTH=true`) |
 | `PUBLIC_URL` | – | external URL, e.g. `https://runwarden.example.com` (oidc, gitlab); the callback is `PUBLIC_URL/auth/callback` |
 | `SESSION_KEY` | – | 32 random bytes, base64 (`openssl rand -base64 32`); required unless `none` |
 | `SESSION_TTL` | `12h` | how long a sign-in lasts |
@@ -242,7 +267,7 @@ is written to. Search the audit trail in Kibana with `event.dataset : "runwarden
 | `OIDC_SCOPES` | `openid profile email` | extra scopes, space-separated (e.g. `groups`) |
 | `OIDC_USERNAME_CLAIM`, `OIDC_GROUPS_CLAIM` | `preferred_username`, `groups` | claims read from the ID token, then userinfo |
 | `GITLAB_URL`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | `https://gitlab.com` | GitLab application (scopes `openid profile email`); user name from `nickname`, groups (full paths) from `groups`, falling back to `groups_direct` |
-| `LDAP_URL` | – | `ldaps://host:636` or `ldap://host:389` (with `LDAP_START_TLS=true`) |
+| `LDAP_URL` | – | `ldaps://host:636` or `ldap://host:389` with `LDAP_START_TLS=true`; plain `ldap://` is refused unless `LDAP_INSECURE=true` (local testing) |
 | `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD` | – | service account used to find users |
 | `LDAP_USER_BASE_DN`, `LDAP_USER_FILTER` | –, `(uid={username})` | where and how to find a user |
 | `LDAP_GROUP_BASE_DN`, `LDAP_GROUP_FILTER`, `LDAP_GROUP_NAME_ATTR` | –, `(member={dn})`, `cn` | group search |
@@ -254,6 +279,11 @@ Sign-in:
   with PKCE, nonce and state checks); the provider returns to `/auth/callback`.
 - LDAP: `POST /auth/login` with `{"username": "...", "password": "..."}`. After 5 failed attempts
   for a user name from one address, further attempts are refused for 15 minutes.
+- Flood protection (all methods): after `LOGIN_MAX_FAILURES_PER_IP` (20) failed sign-ins from one
+  address in 15 minutes, or `LOGIN_MAX_FAILURES_GLOBAL` (100) from everywhere in one minute,
+  sign-ins are refused with `429` without asking the directory. Only the first refusal per
+  address and window is audited, and once a day's activity-log file reaches
+  `ACTIVITY_MAX_DAY_BYTES` (50Mi) failed sign-ins are kept only in the application log.
 - `GET /api/me` returns the signed-in user; `POST /auth/logout` signs out (and returns the
   provider's logout URL when there is one).
 
@@ -397,6 +427,15 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
 - **Retention**: `history.maxAge` (default `90d`) and `history.maxRuns`.
 - **Workspace**: `workspace.enabled` adds a persistent volume at `/var/lib/runwarden-work`
   (`$RUNWARDEN_WORKSPACE` in scripts) for flows that keep files between runs.
+- **Probes** on a separate container port (`health`, 8081); the Service exposes only the web port.
+- **Per-run HOME**: `runs.home` (`per-run` / `shared`) and `runs.homeSkeletonConfigMap` (a
+  ConfigMap copied into every HOME; use `items`/`path` for files in sub-directories such as
+  `.ssh/known_hosts`).
+- **NetworkPolicy** (off by default): `networkPolicy.enabled`, `ingressFrom` (who may reach the web
+  port, e.g. the ingress controller's namespace), `egress.dns` and `egress.rules` (what scripts may
+  reach: GitLab, Azure, the API server...). Plain NetworkPolicy matches IP ranges only; to allow
+  hosts by name use your CNI's FQDN policies (Cilium, Calico) or an egress proxy.
+- `auth.type: none` must be confirmed with `auth.allowNoAuth: true`.
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
   (e.g. an SSH key from a Secret).
 
@@ -441,7 +480,7 @@ and Docker plus `kind` for cluster testing.
 cd web && npm ci && npm run build && cd ..
 
 # Run the server on :8080 with the example scripts, without sign-in (local only)
-AUTH_TYPE=none RUNNERS_DIR=examples/runners go run ./cmd/runwarden
+AUTH_TYPE=none ALLOW_NO_AUTH=true RUNNERS_DIR=examples/runners go run ./cmd/runwarden
 
 # UI with hot reload on :5173, proxying /api and /auth to the server above
 cd web && npm run dev
@@ -454,7 +493,7 @@ go test -race ./...
 golangci-lint run
 govulncheck ./...
 cd web && npm ci && npm test && npm run build
-helm lint --strict deploy/helm/runwarden --set auth.type=none
+helm lint --strict deploy/helm/runwarden --set auth.type=none,auth.allowNoAuth=true
 docker build -t runwarden .   # CI also scans the image with Trivy
 ```
 
@@ -489,4 +528,7 @@ Dockerfile         base image
 
 ## Health checks
 
-`GET /healthz` (liveness) and `GET /readyz` (readiness) return `200 ok`.
+`GET /healthz` (liveness) and `GET /readyz` (readiness) return `200 ok` on `HEALTH_ADDR`
+(`:8081`), a separate listener that the Helm chart does not expose through the Service or
+ingress. On the web port they answer `404`: without a session, the web port offers only sign-in
+and the UI shell.

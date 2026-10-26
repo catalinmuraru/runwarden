@@ -14,7 +14,7 @@ func env(vars map[string]string) func(string) string {
 }
 
 func TestLoadAppDefaults(t *testing.T) {
-	app, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none"}))
+	app, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none", "ALLOW_NO_AUTH": "true"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +38,7 @@ func TestLoadAppDefaults(t *testing.T) {
 func TestLoadAppValues(t *testing.T) {
 	app, err := LoadApp(env(map[string]string{
 		"AUTH_TYPE":           "none",
+		"ALLOW_NO_AUTH":       "true",
 		"LISTEN_ADDR":         "127.0.0.1:9000",
 		"RUNNERS_DIR":         "/etc/runwarden/runners",
 		"DATA_DIR":            "/var/lib/runwarden",
@@ -60,21 +61,21 @@ func TestLoadAppValues(t *testing.T) {
 }
 
 func TestLoadAppRetentionAndProxies(t *testing.T) {
-	app, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none"}))
+	app, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none", "ALLOW_NO_AUTH": "true"}))
 	if err != nil || app.HistoryMaxAge != 90*24*time.Hour || app.HistoryMaxRuns != 0 || app.TrustedProxies != nil {
 		t.Errorf("defaults: %+v %v", app, err)
 	}
 	app, err = LoadApp(env(map[string]string{
-		"AUTH_TYPE": "none", "HISTORY_MAX_AGE": "30d", "HISTORY_MAX_RUNS": "500", "TRUSTED_PROXIES": "10.0.0.0/8, 192.168.0.1",
+		"AUTH_TYPE": "none", "ALLOW_NO_AUTH": "true", "HISTORY_MAX_AGE": "30d", "HISTORY_MAX_RUNS": "500", "TRUSTED_PROXIES": "10.0.0.0/8, 192.168.0.1",
 	}))
 	if err != nil || app.HistoryMaxAge != 30*24*time.Hour || app.HistoryMaxRuns != 500 ||
 		!slices.Equal(app.TrustedProxies, []string{"10.0.0.0/8", "192.168.0.1"}) {
 		t.Errorf("values: %+v %v", app, err)
 	}
-	if app, _ := LoadApp(env(map[string]string{"AUTH_TYPE": "none", "HISTORY_MAX_AGE": "0"})); app.HistoryMaxAge != 0 {
+	if app, _ := LoadApp(env(map[string]string{"AUTH_TYPE": "none", "ALLOW_NO_AUTH": "true", "HISTORY_MAX_AGE": "0"})); app.HistoryMaxAge != 0 {
 		t.Errorf("0 should keep history forever: %v", app.HistoryMaxAge)
 	}
-	_, err = LoadApp(env(map[string]string{"AUTH_TYPE": "none", "HISTORY_MAX_AGE": "soon", "HISTORY_MAX_RUNS": "-1"}))
+	_, err = LoadApp(env(map[string]string{"AUTH_TYPE": "none", "ALLOW_NO_AUTH": "true", "HISTORY_MAX_AGE": "soon", "HISTORY_MAX_RUNS": "-1"}))
 	if err == nil || !strings.Contains(err.Error(), "HISTORY_MAX_AGE") || !strings.Contains(err.Error(), "HISTORY_MAX_RUNS") {
 		t.Errorf("invalid values: %v", err)
 	}
@@ -204,5 +205,74 @@ func TestExpandCommand(t *testing.T) {
 	}
 	if got := Placeholders("a ${X} ${Y} ${X}"); !slices.Equal(got, []string{"X", "Y"}) {
 		t.Errorf("placeholders = %q", got)
+	}
+}
+
+func TestHardeningSettings(t *testing.T) {
+	base := map[string]string{"AUTH_TYPE": "none", "ALLOW_NO_AUTH": "true"}
+	with := func(extra map[string]string) map[string]string {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+
+	app, err := LoadApp(env(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.HealthAddr != ":8081" || app.MaxRunsPerUser != 1 || app.RunHome != RunHomePerRun || app.ValuesMaxPerUser != 2 ||
+		app.ValuesMaxGlobal != 10 || app.ValuesCacheTTL != time.Minute || app.ActivityMaxDay != 50<<20 ||
+		app.Auth.MaxFailuresPerIP != 20 || app.Auth.MaxFailuresGlobal != 100 {
+		t.Errorf("defaults = %+v", app)
+	}
+
+	skel := t.TempDir()
+	app, err = LoadApp(env(with(map[string]string{"MAX_RUNS_PER_USER": "0", "VALUES_CACHE_TTL": "0", "RUN_HOME": "Shared",
+		"HOME_SKELETON": skel, "LOGIN_MAX_FAILURES_PER_IP": "5", "HEALTH_ADDR": "127.0.0.1:9001"})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.MaxRunsPerUser != 0 || app.ValuesCacheTTL != 0 || app.RunHome != RunHomeShared || app.HomeSkeleton != skel ||
+		app.Auth.MaxFailuresPerIP != 5 || app.HealthAddr != "127.0.0.1:9001" {
+		t.Errorf("values = %+v", app)
+	}
+
+	_, err = LoadApp(env(with(map[string]string{"RUN_HOME": "elsewhere", "HOME_SKELETON": filepath.Join(skel, "nope"),
+		"MAX_RUNS_PER_USER": "-1", "TRUSTED_PROXIES": "10.0.0.0/8,0.0.0.0/0,::/0,fd00::/16,nonsense"})))
+	for _, want := range []string{"RUN_HOME", "HOME_SKELETON", "MAX_RUNS_PER_USER", `"0.0.0.0/0" is too wide`, `"::/0" is too wide`,
+		`"fd00::/16" is too wide`, `"nonsense" is not`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error %v does not mention %q", err, want)
+		}
+	}
+	if err != nil && strings.Contains(err.Error(), `"10.0.0.0/8"`) {
+		t.Errorf("10.0.0.0/8 must be accepted: %v", err)
+	}
+}
+
+func TestConfigTraps(t *testing.T) {
+	if _, err := LoadApp(env(map[string]string{"AUTH_TYPE": "none"})); err == nil || !strings.Contains(err.Error(), "ALLOW_NO_AUTH") {
+		t.Errorf("AUTH_TYPE=none without ALLOW_NO_AUTH: %v", err)
+	}
+	ldap := map[string]string{"AUTH_TYPE": "ldap", "SESSION_KEY": testKey, "LDAP_URL": "ldap://dir", "LDAP_USER_BASE_DN": "dc=x"}
+	if _, err := LoadApp(env(ldap)); err == nil || !strings.Contains(err.Error(), "clear text") {
+		t.Errorf("plain ldap:// accepted: %v", err)
+	}
+	for _, extra := range []map[string]string{{"LDAP_START_TLS": "true"}, {"LDAP_INSECURE": "true"}} {
+		vars := map[string]string{}
+		for k, v := range ldap {
+			vars[k] = v
+		}
+		for k, v := range extra {
+			vars[k] = v
+		}
+		if _, err := LoadApp(env(vars)); err != nil {
+			t.Errorf("%v: %v", extra, err)
+		}
 	}
 }

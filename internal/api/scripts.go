@@ -138,7 +138,7 @@ func (s *Server) scriptDefault(ctx context.Context, sc *config.Script, p *params
 	if err != nil {
 		return params.Value{}
 	}
-	out, err := s.exec.Capture(ctx, s.resolveCommand(args), sc.WorkingDirectory)
+	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory)
 	if err != nil {
 		slog.Warn("default script failed", "script", sc.Name, "parameter", p.Name, "err", err)
 		return params.Value{}
@@ -205,6 +205,10 @@ type dependencyError struct{ problems []string }
 func (e *dependencyError) Error() string { return strings.Join(e.problems, "; ") }
 
 func writeValuesError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errHelpersBusy) {
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	var dep *dependencyError
 	if errors.As(err, &dep) {
 		writeError(w, http.StatusBadRequest, "parameters this list depends on are missing or invalid", dep.problems...)
@@ -250,7 +254,7 @@ func (s *Server) dynamicValues(ctx context.Context, sc *config.Script, p *params
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.exec.Capture(ctx, s.resolveCommand(args), sc.WorkingDirectory)
+	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory)
 	if err != nil {
 		return nil, err
 	}

@@ -55,8 +55,11 @@ type User struct {
 type Store struct {
 	dir        string
 	sessionTTL time.Duration
+	// MaxDayBytes caps a day's file for failed sign-ins (0: no cap); see Add.
+	MaxDayBytes int64
 
-	fileMu sync.Mutex // serializes appends
+	fileMu sync.Mutex      // serializes appends
+	capped map[string]bool // days whose cap marker is written
 
 	mu    sync.Mutex
 	users map[string]*User // by lower-case name
@@ -66,7 +69,7 @@ type Store struct {
 // Open opens (creating if needed) the activity log in dataDir. sessionTTL is how long a
 // session lasts after signing in; it decides when an idle user counts as signed out.
 func Open(dataDir string, sessionTTL time.Duration) (*Store, error) {
-	s := &Store{dir: filepath.Join(dataDir, "activity"), sessionTTL: sessionTTL, users: map[string]*User{}}
+	s := &Store{dir: filepath.Join(dataDir, "activity"), sessionTTL: sessionTTL, users: map[string]*User{}, capped: map[string]bool{}}
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return nil, err
 	}
@@ -87,21 +90,12 @@ func Open(dataDir string, sessionTTL time.Duration) (*Store, error) {
 	return s, nil
 }
 
-// Add appends an audit record and updates the users index from it.
+// Add appends an audit record and updates the users index from it. Once a day's file exceeds
+// MaxDayBytes, failed sign-ins (which anyone can cause without an account) are no longer
+// written to it; one marker record says so. Everything else is always kept.
 func (s *Store) Add(r audit.Record) {
-	line, err := json.Marshal(r)
-	if err != nil {
-		slog.Error("activity: encode", "err", err)
-		return
-	}
 	s.fileMu.Lock()
-	f, err := os.OpenFile(s.dayFile(r.Time), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err == nil {
-		_, err = f.Write(append(line, '\n'))
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-	}
+	err := s.append(r)
 	s.fileMu.Unlock()
 	if err != nil {
 		slog.Error("activity: append", "err", err)
@@ -134,6 +128,35 @@ func (s *Store) Add(r audit.Record) {
 		}
 	}
 	s.dirty = true
+}
+
+// append writes r to its day's file. Callers hold s.fileMu.
+func (s *Store) append(r audit.Record) error {
+	path := s.dayFile(r.Time)
+	if s.MaxDayBytes > 0 && r.Action == audit.Login && r.Outcome == "failure" {
+		if info, err := os.Stat(path); err == nil && info.Size() >= s.MaxDayBytes {
+			day := filepath.Base(path)
+			if s.capped[day] {
+				return nil
+			}
+			s.capped[day] = true
+			r = audit.Record{Time: r.Time, Action: audit.Login, Outcome: "failure",
+				Message: "activity log limit reached: further failed sign-ins today are only in the application log"}
+		}
+	}
+	line, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // path built from a date in our own directory
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(line, '\n'))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // Seen records a request by a signed-in user. Updates are throttled per user.

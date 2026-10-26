@@ -44,6 +44,7 @@ type Result struct {
 type Run struct {
 	ID         string
 	ScriptName string
+	User       string // who started it
 	Started    time.Time
 	MaskedArgs []string // arguments with secure values masked, for display and audit
 	Terminal   bool     // runs on a pseudo-terminal: input is echoed by the terminal
@@ -53,7 +54,8 @@ type Run struct {
 	out    *output
 	done   chan struct{}
 	mask   *masker
-	tmpDir string // per-run TMPDIR, removed when the run ends
+	tmpDir string // per-run directory (TMPDIR, HOME), removed when the run ends
+	onEnd  func() // called when the run has ended, before done is closed
 
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser // nil once closed
@@ -295,6 +297,9 @@ func (r *Run) supervise(cmd *exec.Cmd, outR *os.File, pumpDone <-chan struct{}, 
 	r.mu.Unlock()
 
 	r.out.finish()
+	if r.onEnd != nil {
+		r.onEnd()
+	}
 	close(r.done)
 }
 

@@ -8,7 +8,9 @@ cd "$(dirname "$0")/../.."
 CLUSTER=runwarden
 NS=runwarden
 PORT=18080
+HPORT=18081
 B=http://127.0.0.1:$PORT
+H=http://127.0.0.1:$HPORT
 
 step() { echo; echo "== $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -30,15 +32,19 @@ helm upgrade --install runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/v
 kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m
 
 PF=
+HF=
 forward() {
-  [ -n "$PF" ] && kill "$PF" 2>/dev/null || true
+  [ -n "$PF" ] && kill "$PF" "$HF" 2>/dev/null || true
+  # The web port through the Service; the health port only exists on the pod.
   kubectl -n "$NS" port-forward svc/runwarden "$PORT:80" >/dev/null 2>&1 &
   PF=$!
-  for _ in $(seq 50); do curl -fs "$B/readyz" >/dev/null && return; sleep 0.2; done
+  kubectl -n "$NS" port-forward deploy/runwarden "$HPORT:8081" >/dev/null 2>&1 &
+  HF=$!
+  for _ in $(seq 50); do curl -fs "$H/readyz" >/dev/null && curl -fs "$B/auth/config" >/dev/null && return; sleep 0.2; done
   fail "service not reachable"
 }
 cleanup() {
-  [ -n "$PF" ] && kill "$PF" 2>/dev/null || true
+  [ -n "$PF" ] && kill "$PF" "$HF" 2>/dev/null || true
   if [ "${KEEP:-}" != "1" ]; then
     helm uninstall runwarden -n "$NS" >/dev/null 2>&1 || true
     kubectl delete namespace "$NS" --wait=false >/dev/null 2>&1 || true
@@ -54,6 +60,12 @@ echo "$scripts" | grep -q "Restart Service" || fail "example scripts missing"
 curl -fs "$B/api/scripts/%F0%9F%97%82%EF%B8%8F%20Rotate%20Logs/parameters/Instances/values?Environment=production" \
   | jq -e '[.values[].value] | index("web-3")' >/dev/null || fail "dynamic values helper did not run"
 
+step "Health endpoints only on the health port"
+[ "$(kubectl -n "$NS" get svc runwarden -o jsonpath='{.spec.ports[*].name}')" = "http" ] || fail "service exposes more than http"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$B/readyz")
+[ "$code" = "404" ] || fail "/readyz on the service answered $code"
+echo "probes on :8081, service exposes only http, /readyz on the service is 404"
+
 step "Run a script"
 ID=$(curl -fs -X POST "$B/api/scripts/Restart%20Service/runs" -H 'Content-Type: application/json' \
   -d '{"values":{"Service":"api"}}' | jq -r .id)
@@ -64,6 +76,15 @@ echo "$result" | jq -e '.status == "finished"' >/dev/null || fail "run did not f
 curl -fs "$B/api/runs/$ID/output" | grep -q '\[--service\]' || fail "output missing"
 curl -fs "$B/api/runs/$ID" | jq -e '.terminal == true' >/dev/null || fail "run did not get a terminal"
 echo "ran on a terminal"
+
+step "Private HOME per run, one run per user"
+curl -fs "$B/api/runs/$ID/output" | grep -q 'HOME=/var/lib/runwarden/tmp/'"$ID"'/home' || fail "run did not get a private HOME"
+curl -fs "$B/api/runs/$ID/output" | grep -q 'KUBECONFIG=/var/lib/runwarden/tmp/'"$ID"'/home/.kube/config' || fail "KUBECONFIG not private"
+first=$(curl -fs -X POST "$B/api/scripts/Restart%20Service/runs" -H 'Content-Type: application/json' -d '{"values":{"Service":"api"}}' | jq -r .id)
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/scripts/Restart%20Service/runs" -H 'Content-Type: application/json' -d '{"values":{"Service":"api"}}')
+[ "$code" = "429" ] || fail "second concurrent run by the same user answered $code"
+timeout 30 websocat -t --no-close "ws://127.0.0.1:$PORT/api/runs/$first/ws" </dev/null >/dev/null || true
+echo "HOME and KUBECONFIG inside the run's own directory; a second concurrent run is refused"
 
 step "Audit log (ECS) in the pod log"
 kubectl -n "$NS" logs deploy/runwarden | jq -ec --arg id "$ID" \
@@ -90,6 +111,21 @@ kubectl -n "$NS" exec deploy/runwarden -- touch /tmp/x /home/runwarden/x || fail
 kubectl -n "$NS" exec deploy/runwarden -- sh -c 'test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token' \
   || fail "service account token mounted"
 echo "uid 10001, read-only root, writable /tmp and HOME, no API token"
+
+step "NetworkPolicy"
+api_ip=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')
+probe() { kubectl -n "$NS" exec deploy/runwarden -- timeout 3 bash -c "echo > /dev/tcp/$api_ip/443" >/dev/null 2>&1; }
+probe || fail "API server not reachable before the policy (test precondition)"
+helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --set networkPolicy.enabled=true --wait --timeout 2m >/dev/null
+blocked=
+for _ in $(seq 30); do if ! probe; then blocked=1; break; fi; sleep 1; done
+[ -n "$blocked" ] || fail "egress outside the allowlist still works"
+curl -fs "$B/api/scripts" >/dev/null || fail "web port blocked by the policy"
+ID2=$(curl -fs -X POST "$B/api/scripts/Restart%20Service/runs" -H 'Content-Type: application/json' -d '{"values":{"Service":"web"}}' | jq -r .id)
+timeout 30 websocat -t --no-close "ws://127.0.0.1:$PORT/api/runs/$ID2/ws" </dev/null | jq -e 'select(.type=="result") | .status == "finished"' >/dev/null \
+  || fail "run failed under the policy"
+helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 2m >/dev/null
+echo "egress outside the allowlist blocked, web port and runs still work"
 
 step "History survives a pod restart"
 kubectl -n "$NS" delete pod -l app.kubernetes.io/name=runwarden --wait=true >/dev/null

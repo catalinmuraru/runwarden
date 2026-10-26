@@ -19,10 +19,23 @@ func newLimiter(maxFailures int, window time.Duration) *limiter {
 	return &limiter{failures: map[string][]time.Time{}, max: maxFailures, window: window, now: time.Now}
 }
 
+// allowed reports whether key may try again. A limiter with max <= 0 never blocks.
 func (l *limiter) allowed(key string) bool {
+	if l.max <= 0 {
+		return true
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.recent(key)) < l.max
+}
+
+// first records an event for key and reports whether it is the first one in the window.
+func (l *limiter) first(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := len(l.recent(key))
+	l.failures[key] = append(l.failures[key], l.now())
+	return n == 0
 }
 
 func (l *limiter) fail(key string) {

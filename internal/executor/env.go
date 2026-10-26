@@ -18,9 +18,14 @@ type EnvPolicy struct {
 	// Prefix exposes Runwarden variables to scripts with the prefix stripped:
 	// RUNNER_ENV_FOO=x reaches scripts as FOO=x. Empty means "RUNNER_ENV_".
 	Prefix string
-	// TempRoot, if set, gets a private directory per run, exported to the script as TMPDIR and
-	// removed when the run ends.
+	// TempRoot, if set, gets a private directory per run (and per helper call), removed when it
+	// ends. Its tmp/ is exported as TMPDIR.
 	TempRoot string
+	// PrivateHome gives every run its own HOME inside that directory, with KUBECONFIG and
+	// AZURE_CONFIG_DIR in it, instead of Runwarden's HOME. Needs TempRoot.
+	PrivateHome bool
+	// HomeSkeleton, if set, is copied into every private HOME (e.g. .gitconfig, .ssh/known_hosts).
+	HomeSkeleton string
 }
 
 func (p EnvPolicy) withDefaults() EnvPolicy {
@@ -79,7 +84,8 @@ func (p EnvPolicy) build(paramEnv, fixed map[string]string) (env []string, refus
 // the shell or the search path, so a user-supplied value could run arbitrary code.
 func deniedEnv(name string) bool {
 	switch name {
-	case "PATH", "HOME", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "PS4", "PROMPT_COMMAND", "RUNWARDEN_USER", "TMPDIR", "TERM", "":
+	case "PATH", "HOME", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "PS4", "PROMPT_COMMAND", "RUNWARDEN_USER", "TMPDIR", "TERM",
+		"KUBECONFIG", "AZURE_CONFIG_DIR", "":
 		return true
 	}
 	return strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "BASH_FUNC_")
