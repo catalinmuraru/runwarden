@@ -433,3 +433,16 @@ func TestExampleRunners(t *testing.T) {
 		t.Errorf("stdin value not received:\n%s", out)
 	}
 }
+
+func TestSecretsExportedAndMasked(t *testing.T) {
+	s := testScript(t, "args.sh")
+	r := mustStart(t, New(Limits{}, EnvPolicy{}), Request{Script: s, Secrets: map[string]string{"DB_PASSWORD": "prod-db-pw"}}) //nolint:gosec // test value
+	waitDone(t, r)
+	out := outputOf(r)
+	if strings.Contains(out, "prod-db-pw") {
+		t.Fatalf("secret leaked into output:\n%s", out)
+	}
+	if !strings.Contains(out, "env:DB_PASSWORD=******") {
+		t.Errorf("secret not exported:\n%s", out)
+	}
+}

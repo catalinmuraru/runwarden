@@ -89,6 +89,8 @@ func (p *Policy) Validate(maxExceptionDays int) error {
 			add("environment %d: name %q must be letters, digits, '.', '_' or '-'", i+1, e.Name)
 		case envs[strings.ToLower(e.Name)]:
 			add("environment %q is defined twice", e.Name)
+		case strings.EqualFold(e.Name, "common"):
+			add("environment name %q is reserved for secrets shared by all environments", e.Name)
 		}
 		envs[strings.ToLower(e.Name)] = true
 		for _, m := range e.Match {

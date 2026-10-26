@@ -16,6 +16,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
+	"github.com/catalinmuraru/runwarden/internal/secrets"
 )
 
 // Options configure the API.
@@ -32,6 +33,8 @@ type Options struct {
 	Access *authz.Authorizer
 	// Activity, if set, records who uses the server and serves the admin pages.
 	Activity *activity.Store
+	// Secrets gives runs the declared secrets of their environments.
+	Secrets secrets.Store
 	// Sessions, if set, lets admins see and revoke sign-in sessions.
 	Sessions SessionAdmin
 	// Helper scripts (dropdown values, defaults): concurrent calls per user and in total
@@ -154,6 +157,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	h("GET /api/admin/users", s.adminOnly(s.adminUsers))
 	h("GET /api/admin/activity", s.adminOnly(s.adminActivity))
 	h("POST /api/admin/users/{name}/sign-out", s.adminOnly(s.adminSignOut))
+	h("GET /api/admin/secrets", s.adminOnly(s.adminSecrets))
 	h("GET /api/admin/policy", s.policyOnly(s.getPolicy))
 	h("PUT /api/admin/policy/environments", s.policyOnly(s.putEnvironments))
 	h("POST /api/admin/policy/roles", s.policyOnly(s.postRole))

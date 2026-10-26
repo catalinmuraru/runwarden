@@ -1,0 +1,81 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { api, type SecretsOverview } from '../../api'
+import { gapCount, secretCell, secretColumns } from '../../lib/secrets'
+
+const data = ref<SecretsOverview | null>(null)
+const error = ref('')
+
+const columns = computed(() => (data.value ? secretColumns(data.value) : []))
+const rows = computed(() => (data.value?.scripts ?? []).map((s) => ({ ...s, cells: columns.value.map((c) => ({ column: c, ...secretCell(s, c) })) })))
+const dirs = computed(() => Object.entries(data.value?.available ?? {}).sort(([a], [b]) => a.localeCompare(b)))
+
+async function load() {
+  error.value = ''
+  try {
+    data.value = await api.adminSecrets()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+onMounted(load)
+defineExpose({ load })
+</script>
+
+<template>
+  <p class="muted">
+    Secrets come from one Kubernetes Secret per environment (plus <code>common</code>), mounted read-only. A run receives only the
+    secrets its runner config declares (<code>"secrets"</code>), from the environment it runs in, and they are masked in its output.
+    Values are never shown here; change them in Kubernetes or your secret manager.
+  </p>
+  <p v-if="error" class="alert" role="alert">{{ error }}</p>
+  <p v-else-if="!data" class="muted">Loading…</p>
+  <template v-else>
+    <p v-if="!data.configured" class="alert">No secrets directory is configured (<code>SECRETS_DIR</code>).</p>
+    <p v-if="data.unknown_dirs.length" class="alert" role="alert">
+      Secrets for {{ data.unknown_dirs.join(', ') }}: no environment has that name, so no run receives them. Rename the environment or
+      the mounted Secret (Helm <code>secrets.environments</code>).
+    </p>
+
+    <h2>Scripts</h2>
+    <p v-if="!data.scripts.length" class="muted">No runner config declares secrets.</p>
+    <template v-else>
+      <p v-if="gapCount(data)" class="tone-warn">
+        {{ gapCount(data) }} script/environment combination(s) cannot start: a declared secret is missing there.
+      </p>
+      <div class="table-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th scope="col">Script</th>
+              <th v-for="c in columns" :key="c" scope="col">{{ c === '-' ? 'no environment' : c }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in rows" :key="s.name">
+              <th scope="row">
+                {{ s.name }}
+                <div class="muted small">{{ s.secrets.join(', ') }}</div>
+              </th>
+              <td v-for="cell in s.cells" :key="cell.column">
+                <span v-if="cell.state === 'ok'" class="badge tone-ok">✓</span>
+                <span v-else-if="cell.state === 'missing'" class="badge tone-bad">missing {{ cell.names.join(', ') }}</span>
+                <span v-else class="muted">–</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <h2>Available secrets</h2>
+    <p v-if="!dirs.length" class="muted">None mounted.</p>
+    <dl v-else class="meta card">
+      <template v-for="[dir, names] in dirs" :key="dir">
+        <dt>{{ dir }}</dt>
+        <dd>{{ names.length ? names.join(', ') : '(empty)' }}</dd>
+      </template>
+    </dl>
+  </template>
+</template>

@@ -86,7 +86,7 @@ func TestCapturePrivateHome(t *testing.T) {
 	root := t.TempDir()
 	e := New(Limits{}, EnvPolicy{TempRoot: root, PrivateHome: true})
 	script, _ := filepath.Abs("testdata/home.sh")
-	out, err := e.Capture(context.Background(), []string{script, "helper", "0"}, t.TempDir())
+	out, err := e.Capture(context.Background(), []string{script, "helper", "0"}, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

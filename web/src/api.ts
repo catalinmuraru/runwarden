@@ -74,6 +74,7 @@ export interface RunMeta {
   files?: string[]
   terminal?: boolean // ran on a pseudo-terminal (input is echoed by the terminal)
   environments?: string[] // "-" for runs of scripts without environments
+  secrets?: string[] // names of the secrets the run received
   can_control?: boolean // only on a single run: may send input, stop and kill
 }
 
@@ -159,6 +160,14 @@ export interface EffectiveAccess {
   roles: string[]
   environments: string[]
   scripts: { name: string; group?: string; tags?: string[]; access: Record<string, Grant> }[]
+}
+
+export interface SecretsOverview {
+  configured: boolean // SECRETS_DIR set
+  environments: string[]
+  available: Record<string, string[]> // directory (environment or "common") → secret names
+  unknown_dirs: string[] // directories that are no environment of the policy
+  scripts: { name: string; secrets: string[]; missing: Record<string, string[]>; envless: boolean }[]
 }
 
 export interface ImportSummary {
@@ -330,6 +339,7 @@ export const api = {
   endException: (revision: number, id: string) =>
     request<PolicyView>('DELETE', `/api/admin/policy/exceptions/${enc(id)}${query({ revision: String(revision) })}`),
   effective: (who: { user?: string; role?: string }) => request<EffectiveAccess>('GET', `/api/admin/policy/effective${query(who)}`),
+  adminSecrets: () => request<SecretsOverview>('GET', '/api/admin/secrets'),
   exportPolicyURL: '/api/admin/policy/export',
   previewImport: (yaml: string) =>
     request<{ summary: ImportSummary; warnings: string[] }>('POST', '/api/admin/policy/import?dry_run=true', new RawBody(yaml, 'application/yaml')),

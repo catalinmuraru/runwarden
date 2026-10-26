@@ -206,7 +206,13 @@ func (s *Server) scriptDefault(ctx context.Context, sc *config.Script, p *params
 	if err != nil {
 		return params.Value{}
 	}
-	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory)
+	// Defaults are computed before the user chose anything: the environment of the defaults.
+	sec, err := s.helperSecrets(sc, func(string) (any, bool) { return nil, false })
+	if err != nil {
+		slog.Warn("default script: secrets", "script", sc.Name, "parameter", p.Name, "err", err)
+		return params.Value{}
+	}
+	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec)
 	if err != nil {
 		slog.Warn("default script failed", "script", sc.Name, "parameter", p.Name, "err", err)
 		return params.Value{}
@@ -288,6 +294,10 @@ func writeValuesError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "parameters this list depends on are missing or invalid", dep.problems...)
 		return
 	}
+	if secretRefusal(err) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	slog.Warn("values script failed", "err", err)
 	writeError(w, http.StatusBadGateway, "could not load values")
 }
@@ -328,7 +338,11 @@ func (s *Server) dynamicValues(ctx context.Context, sc *config.Script, p *params
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory)
+	sec, err := s.helperSecrets(sc, raw)
+	if err != nil {
+		return nil, err
+	}
+	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec)
 	if err != nil {
 		return nil, err
 	}

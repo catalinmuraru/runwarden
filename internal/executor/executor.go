@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,6 +52,8 @@ type Request struct {
 	Values  map[string]params.Value // validated values, see config.Script.Values
 	Timeout time.Duration           // zero means Limits.Timeout
 	User    string                  // signed-in user, exported to the script as RUNWARDEN_USER
+	// Secrets are exported to the script (name → value) and masked in its output.
+	Secrets map[string]string
 }
 
 // ErrBusy is returned when the concurrent run limit is reached.
@@ -167,7 +170,7 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 		}
 		return nil, err
 	}
-	env, refused := e.env.build(inv.Env, fixed)
+	env, refused := e.env.build(inv.Env, req.Secrets, fixed)
 	for _, name := range refused {
 		logger().Warn("env variable refused for parameter", "script", s.Name, "variable", name)
 	}
@@ -213,7 +216,11 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 	}
 
 	timeout := e.Timeout(req.Timeout)
-	m := newMasker(inv.SecureValues, s.RedactPatterns)
+	masked := slices.Clone(inv.SecureValues)
+	for _, v := range req.Secrets {
+		masked = append(masked, v)
+	}
+	m := newMasker(masked, s.RedactPatterns)
 	r := &Run{
 		ID:         id,
 		ScriptName: s.Name,

@@ -29,6 +29,12 @@ kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/d
 kubectl -n "$NS" create secret generic runwarden-env --from-literal=RUNNER_ENV_GREETING=hello \
   --from-literal=SESSION_KEY="$(openssl rand -base64 32)" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+DEV_DB=dev-db-password
+PROD_DB=prod-db-password-2026
+secret() { kubectl -n "$NS" create secret generic "$1" "${@:2}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null; }
+secret runwarden-secrets-common --from-literal=API_TOKEN=common-api-token
+secret runwarden-secrets-development --from-literal=DB_PASSWORD="$DEV_DB"
+secret runwarden-secrets-production --from-literal=DB_PASSWORD="$PROD_DB"
 helm upgrade --install runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 3m
 kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m
 
@@ -77,6 +83,31 @@ echo "$result" | jq -e '.status == "finished"' >/dev/null || fail "run did not f
 curl -fs "$B/api/runs/$ID/output" | grep -q '\[--service\]' || fail "output missing"
 curl -fs "$B/api/runs/$ID" | jq -e '.terminal == true' >/dev/null || fail "run did not get a terminal"
 echo "ran on a terminal"
+
+step "Secrets per environment"
+credentials() { # environment → output of a Check Credentials run
+  local id
+  id=$(curl -fs -X POST "$B/api/scripts/Check%20Credentials/runs" -H 'Content-Type: application/json' \
+    -d "{\"values\":{\"Environment\":\"$1\"}}" | jq -r .id) || fail "Check Credentials did not start in $1"
+  timeout 30 websocat -t --no-close "ws://127.0.0.1:$PORT/api/runs/$id/ws" </dev/null >/dev/null || true
+  curl -fs "$B/api/runs/$id/output"
+}
+fp() { printf '%s' "$1" | sha256sum | cut -c1-12; }
+dev=$(credentials development)
+prod=$(credentials production)
+echo "$dev" | grep -q "DB_PASSWORD: ${#DEV_DB} characters, fingerprint $(fp "$DEV_DB")" || fail "development secret wrong: $dev"
+echo "$prod" | grep -q "DB_PASSWORD: ${#PROD_DB} characters, fingerprint $(fp "$PROD_DB")" || fail "production secret wrong: $prod"
+echo "$prod" | grep -q "API_TOKEN: 16 characters" || fail "common secret missing: $prod"
+echo "$dev$prod" | grep -q 'printed as is: \*\*\*\*\*\*' || fail "printed secret not masked"
+if echo "$dev$prod" | grep -qE "$DEV_DB|$PROD_DB|common-api-token"; then fail "secret value in the output"; fi
+code=$(curl -s -o /tmp/rw-acc.json -w '%{http_code}' -X POST "$B/api/scripts/Check%20Credentials/runs" \
+  -H 'Content-Type: application/json' -d '{"values":{"Environment":"acceptance"}}')
+[ "$code" = "409" ] && grep -q 'DB_PASSWORD is not available in acceptance' /tmp/rw-acc.json || fail "missing secret answered $code: $(cat /tmp/rw-acc.json)"
+curl -fs "$B/api/admin/secrets" | jq -e '(.scripts[] | select(.name == "Check Credentials") | .missing.acceptance) == ["DB_PASSWORD"]' >/dev/null \
+  || fail "admin secrets page does not show the gap"
+[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /etc/runwarden/secrets/production/DB_PASSWORD)" = "440" ] || fail "secret file mode"
+if kubectl -n "$NS" exec deploy/runwarden -- env | grep -q "$PROD_DB"; then fail "secret in Runwarden's own environment"; fi
+echo "each environment's value reaches its runs (common as fallback), masked; missing secret refused; files 0440, not in Runwarden's env"
 
 step "Private HOME per run, one run per user"
 curl -fs "$B/api/runs/$ID/output" | grep -q 'HOME=/var/lib/runwarden/tmp/'"$ID"'/home' || fail "run did not get a private HOME"

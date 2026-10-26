@@ -39,10 +39,10 @@ func (p EnvPolicy) withDefaults() EnvPolicy {
 }
 
 // build returns the script environment: allowlisted and prefixed variables from Runwarden's
-// environment, then parameter variables, then fixed variables set by Runwarden itself.
-// Parameter variables that could change how the script or its interpreter runs, or spoof a
-// fixed variable, are refused and returned by name.
-func (p EnvPolicy) build(paramEnv, fixed map[string]string) (env []string, refused []string) {
+// environment, then parameter variables, then the run's secrets, then fixed variables set by
+// Runwarden itself. Parameter variables that could change how the script or its interpreter
+// runs, or spoof a secret or a fixed variable, are refused and returned by name.
+func (p EnvPolicy) build(paramEnv, secrets, fixed map[string]string) (env []string, refused []string) {
 	vars := map[string]string{}
 	for _, name := range p.Allow {
 		if v, ok := os.LookupEnv(name); ok {
@@ -62,10 +62,15 @@ func (p EnvPolicy) build(paramEnv, fixed map[string]string) (env []string, refus
 		}
 	}
 	for name, value := range paramEnv {
-		if _, isFixed := fixed[name]; isFixed || deniedEnv(name) {
+		_, isFixed := fixed[name]
+		_, isSecret := secrets[name]
+		if isFixed || isSecret || deniedEnv(name) {
 			refused = append(refused, name)
 			continue
 		}
+		vars[name] = value
+	}
+	for name, value := range secrets {
 		vars[name] = value
 	}
 	for name, value := range fixed {

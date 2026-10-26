@@ -16,3 +16,9 @@ workspace:
   enabled: true
   size: 1Gi
   keepOnUninstall: false
+# Created by deploy/kind/test.sh; acceptance has none on purpose (missing-secret check).
+secrets:
+  common: runwarden-secrets-common
+  environments:
+    development: runwarden-secrets-development
+    production: runwarden-secrets-production

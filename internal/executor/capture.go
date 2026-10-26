@@ -20,7 +20,8 @@ const (
 // Capture runs a short helper command, such as a script listing the allowed values of a
 // parameter, and returns its stdout. It uses the same environment policy and process-group
 // handling as runs, is not counted against the run limit, and is killed after 30 seconds.
-func (e *Executor) Capture(ctx context.Context, command []string, dir string) ([]byte, error) {
+// secrets are exported to it and masked in what it returns.
+func (e *Executor) Capture(ctx context.Context, command []string, dir string, secrets map[string]string) ([]byte, error) {
 	if len(command) == 0 {
 		return nil, errors.New("executor: empty command")
 	}
@@ -35,7 +36,7 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string) ([
 	if dir0 != "" {
 		defer func() { _ = os.RemoveAll(dir0) }()
 	}
-	env, _ := e.env.build(nil, vars)
+	env, _ := e.env.build(nil, secrets, vars)
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // argv from config, no shell
 	cmd.Dir = dir
 	cmd.Env = env
@@ -59,12 +60,24 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string) ([
 	case ctx.Err() != nil:
 		return nil, fmt.Errorf("%s: timed out", command[0])
 	case err != nil:
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(string(maskAll(stderr.Bytes(), secrets)))
 		return nil, fmt.Errorf("%s: %w: %s", command[0], err, msg)
 	case stdout.overflow:
 		return nil, fmt.Errorf("%s: output exceeds %d bytes", command[0], captureMax)
 	}
-	return stdout.Bytes(), nil
+	return maskAll(stdout.Bytes(), secrets), nil
+}
+
+// maskAll replaces every secret value in b, longest first.
+func maskAll(b []byte, secrets map[string]string) []byte {
+	if len(secrets) == 0 {
+		return b
+	}
+	m := newMasker(nil, nil)
+	for _, v := range secrets {
+		m.addLocked(v)
+	}
+	return m.replace(bytes.Clone(b))
 }
 
 // capped keeps the first max bytes written and discards the rest. The buffer is a named field,

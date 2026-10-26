@@ -56,6 +56,7 @@ type Event struct {
 	Count    int // e.g. runs removed by a cleanup
 
 	Environments []string // environments a run touches
+	Secrets      []string // names (never values) of the secrets a run received
 	PolicyObject string   // what a policy change is about, e.g. "rule 1a2b3c4d"
 	PolicyChange string   // short description of the change
 }
@@ -141,6 +142,9 @@ func Log(ctx context.Context, e Event) {
 	if len(authAttrs) > 0 {
 		custom = append(custom, slog.Group("auth", authAttrs...))
 	}
+	if len(e.Secrets) > 0 {
+		custom = append(custom, slog.Any("secrets", e.Secrets))
+	}
 	if len(e.Environments) > 0 {
 		custom = append(custom, slog.Any("environments", e.Environments))
 	}
@@ -163,7 +167,7 @@ func Log(ctx context.Context, e Event) {
 			User: e.User, Roles: e.Roles, Groups: e.Groups, AuthMethod: e.AuthMethod, SourceIP: e.SourceIP, UserAgent: e.UserAgent,
 			RunID: e.RunID, Script: e.Script, Status: e.Status, Values: e.Values, Args: e.Args,
 			ExitCode: e.ExitCode, DurationMS: e.Duration.Milliseconds(), Count: e.Count,
-			Environments: e.Environments, PolicyObject: e.PolicyObject, PolicyChange: e.PolicyChange,
+			Environments: e.Environments, Secrets: e.Secrets, PolicyObject: e.PolicyObject, PolicyChange: e.PolicyChange,
 		})
 	}
 }
@@ -191,6 +195,7 @@ type Record struct {
 	Count      int            `json:"count,omitempty"`
 
 	Environments []string `json:"environments,omitempty"`
+	Secrets      []string `json:"secrets,omitempty"`
 	PolicyObject string   `json:"policy_object,omitempty"`
 	PolicyChange string   `json:"policy_change,omitempty"`
 }

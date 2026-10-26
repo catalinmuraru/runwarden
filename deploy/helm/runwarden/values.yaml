@@ -98,6 +98,18 @@ valueScripts:
 activity:
   maxDayBytes: 50Mi
 
+# Secrets for scripts, per environment: each value is the name of a Kubernetes Secret (created
+# outside the chart, e.g. with External Secrets or sealed secrets) mounted read-only at
+# /etc/runwarden/secrets/<environment>, one file per key. A run receives only the secrets its
+# runner config declares ("secrets": [...]), from the environment it runs in; keys of `common`
+# are used when the environment has no key of that name. Environment names must match the
+# environments of the access policy (Admin area > Environments).
+secrets:
+  common: ""
+  environments: {}
+  #   development: runwarden-secrets-development
+  #   production: runwarden-secrets-production
+
 # Access policy: roles, rules and exceptions are edited in the Admin area and kept on the data
 # volume (policy.json). The environments here only seed a new policy; afterwards they are
 # managed in the Admin area too.

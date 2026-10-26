@@ -115,6 +115,7 @@ type rawScript struct {
 	AllowedUsers     json.RawMessage   `json:"allowed_users"` // ignored: rules decide access
 	AdminUsers       json.RawMessage   `json:"admin_users"`   // ignored: rules decide access
 	Tags             stringOrList      `json:"tags"`
+	Secrets          stringOrList      `json:"secrets"`
 	EnvParams        map[string]string `json:"environment_parameters"`
 	OutputFiles      []string          `json:"output_files"`
 	RedactPatterns   []string          `json:"redact_patterns"`

@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/history"
 	"github.com/catalinmuraru/runwarden/internal/logging"
 	"github.com/catalinmuraru/runwarden/internal/policy"
+	"github.com/catalinmuraru/runwarden/internal/secrets"
 	"github.com/catalinmuraru/runwarden/internal/web"
 )
 
@@ -53,6 +56,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
 	}
+	warnSharedSecrets(os.Environ())
 	cat, err := loadCatalog(cfg)
 	if err != nil {
 		return err
@@ -113,6 +117,7 @@ func run() error {
 		Authenticate:   authH.Middleware,
 		Access:         access,
 		Activity:       acts,
+		Secrets:        secrets.Store{Dir: cfg.SecretsDir},
 
 		ValuesMaxPerUser: cfg.ValuesMaxPerUser,
 		ValuesMaxGlobal:  cfg.ValuesMaxGlobal,
@@ -415,4 +420,28 @@ func newHealthMux(apiSrv *api.Server) *http.ServeMux {
 func ok(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte("ok\n"))
+}
+
+// warnSharedSecrets warns about RUNNER_ENV_* variables that look like secrets: they reach every
+// script in every environment. Secrets belong in SECRETS_DIR, per environment.
+func warnSharedSecrets(environ []string) {
+	var names []string
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		rest, ok := strings.CutPrefix(name, "RUNNER_ENV_")
+		if !ok {
+			continue
+		}
+		for _, hint := range []string{"TOKEN", "PASSWORD", "PASSWD", "SECRET", "KEY", "CREDENTIAL"} {
+			if strings.Contains(rest, hint) {
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	if len(names) > 0 {
+		slices.Sort(names)
+		slog.Warn("these RUNNER_ENV_ variables look like secrets and reach every script in every environment; "+
+			"move them to the secrets of an environment (SECRETS_DIR) and declare them in the runner configs", "variables", names)
+	}
 }

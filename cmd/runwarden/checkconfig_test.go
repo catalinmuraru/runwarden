@@ -12,7 +12,7 @@ func TestCheckConfigExamples(t *testing.T) {
 	if code := checkConfig([]string{"examples/runners"}, &out); code != 0 {
 		t.Fatalf("exit code %d, output:\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "4 scripts, 1 warnings, 0 errors") {
+	if !strings.Contains(out.String(), "5 scripts, 1 warnings, 0 errors") || !strings.Contains(out.String(), "secrets DB_PASSWORD, API_TOKEN") {
 		t.Errorf("unexpected summary:\n%s", out.String())
 	}
 }
