@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"io/fs"
@@ -19,10 +18,11 @@ const (
 	adminPasswordFile = "initial-admin-password"
 )
 
-// LocalAdmin checks the built-in administrator's password. Only its SHA-256 is kept in memory;
-// the password itself is random and long, so a slow hash adds nothing.
+// LocalAdmin checks the built-in administrator's password. The password is 256 random bits
+// generated at start and already stored in a file next to the data, so it is kept as it is and
+// compared in constant time; a password hash would add nothing.
 type LocalAdmin struct {
-	digest [32]byte
+	password []byte
 }
 
 // EnableLocalAdmin generates a new password, writes it to dataDir/initial-admin-password (0600)
@@ -40,7 +40,7 @@ func EnableLocalAdmin(dataDir string) (*LocalAdmin, string, error) {
 	if err := os.Rename(tmp, path); err != nil {
 		return nil, "", err
 	}
-	return &LocalAdmin{digest: sha256.Sum256([]byte(password))}, path, nil
+	return &LocalAdmin{password: []byte(password)}, path, nil
 }
 
 // DisableLocalAdmin removes the password file, if any.
@@ -54,8 +54,7 @@ func DisableLocalAdmin(dataDir string) error {
 
 // Authenticate implements PasswordProvider. The user name is ignored: there is one account.
 func (l *LocalAdmin) Authenticate(_ context.Context, _, password string) (User, error) {
-	got := sha256.Sum256([]byte(password))
-	if subtle.ConstantTimeCompare(got[:], l.digest[:]) != 1 {
+	if subtle.ConstantTimeCompare([]byte(password), l.password) != 1 {
 		return User{}, ErrInvalidCredentials
 	}
 	return User{Name: LocalAdminName, Method: MethodLocal}, nil
