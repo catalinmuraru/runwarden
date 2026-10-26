@@ -207,12 +207,12 @@ func (s *Server) scriptDefault(ctx context.Context, sc *config.Script, p *params
 		return params.Value{}
 	}
 	// Defaults are computed before the user chose anything: the environment of the defaults.
-	sec, err := s.helperSecrets(sc, func(string) (any, bool) { return nil, false })
+	sec, kc, err := s.helperEnv(sc, func(string) (any, bool) { return nil, false })
 	if err != nil {
-		slog.Warn("default script: secrets", "script", sc.Name, "parameter", p.Name, "err", err)
+		slog.Warn("default script: secrets or kubeconfig", "script", sc.Name, "parameter", p.Name, "err", err)
 		return params.Value{}
 	}
-	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec)
+	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec, kc)
 	if err != nil {
 		slog.Warn("default script failed", "script", sc.Name, "parameter", p.Name, "err", err)
 		return params.Value{}
@@ -338,11 +338,11 @@ func (s *Server) dynamicValues(ctx context.Context, sc *config.Script, p *params
 	if err != nil {
 		return nil, err
 	}
-	sec, err := s.helperSecrets(sc, raw)
+	sec, kc, err := s.helperEnv(sc, raw)
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec)
+	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec, kc)
 	if err != nil {
 		return nil, err
 	}

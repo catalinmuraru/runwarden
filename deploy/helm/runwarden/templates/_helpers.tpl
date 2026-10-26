@@ -80,6 +80,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end -}}
 {{- end -}}
 {{- $_ := set $e "SECRETS_DIR" "/etc/runwarden/secrets" -}}
+{{- $_ := set $e "KUBE_DIR" "/etc/runwarden/kube" -}}
+{{- if and .Values.kube.environments (ne (toString .Values.runs.home) "per-run") -}}
+{{- fail "kube.environments needs runs.home=per-run: the kubeconfig is written into the run's private HOME" -}}
+{{- end -}}
 {{- $p := .Values.policy -}}
 {{- with $p.environments }}{{ $_ := set $e "POLICY_ENVIRONMENTS" (toJson .) }}{{ end -}}
 {{- with $p.unknownEnvironment }}{{ $_ := set $e "POLICY_UNKNOWN_ENVIRONMENT" . }}{{ end -}}

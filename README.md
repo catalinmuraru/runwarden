@@ -80,7 +80,8 @@ scanned too). See [examples/runners/](examples/runners/) for complete examples.
 **Script fields:** `name`, `script_path` (path plus optional fixed arguments, never run
 through a shell), `working_directory`, `description`, `group`, `tags` (the script's audience, used
 by access rules as `tag:<tag>`), `environment_parameters` (see *Access control*), `secrets` (names of
-the secrets a run receives, see *Secrets*), `output_files` (globs offered for download), `timeout` (this
+the secrets a run receives, see *Secrets*), `kubernetes` (`true`: the run gets its environment's
+cluster, see *Kubernetes clusters per environment*), `output_files` (globs offered for download), `timeout` (this
 script's time limit, e.g. `"4h"` or a number of minutes; default `RUN_TIMEOUT`, at most
 `RUN_TIMEOUT_MAX`), `requires_terminal`,
 `scheduling.enabled`, `include` (merge parameters from other files), `hidden` (only usable as an
@@ -140,8 +141,9 @@ go run ./cmd/runwarden check-config path/to/runners
   helper script, also gets its own empty `HOME`, with `KUBECONFIG=$HOME/.kube/config` and
   `AZURE_CONFIG_DIR=$HOME/.azure`, removed when it ends. A kube context, `az` login or git
   credentials written by one run never reach another run, e.g. one user working on production
-  while another works on development. Scripts therefore log in per run (`az login`,
-  `az aks get-credentials`); files that must survive go to `$RUNWARDEN_WORKSPACE`. `HOME_SKELETON`
+  while another works on development. Scripts therefore log in per run (`az login`); runners
+  with `"kubernetes": true` get their cluster from Runwarden (see *Kubernetes clusters per
+  environment*) instead of `az aks get-credentials`; files that must survive go to `$RUNWARDEN_WORKSPACE`. `HOME_SKELETON`
   is copied into every new HOME (e.g. `.gitconfig`, `.ssh/known_hosts`). `RUN_HOME=shared`
   keeps one HOME for all runs, for scripts that are not migrated yet. All runs share one user ID,
   so this separates paths, not processes.
@@ -184,6 +186,7 @@ All settings come from environment variables. Secrets are never read from files.
 | `ALLOWED_ORIGINS` | – | extra hosts allowed to open WebSockets, comma-separated (`ops.example.com,*.example.org`); the server's own host is always allowed |
 | `RUNNER_ENV_<NAME>` | – | passed to every script as `<NAME>`: for settings, **not secrets** (the server warns about names that look like secrets) |
 | `SECRETS_DIR` | `/etc/runwarden/secrets` | secrets per environment, see *Secrets* |
+| `KUBE_DIR` | `/etc/runwarden/kube` | kubeconfig per environment, see *Kubernetes clusters per environment* |
 | `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
 | `HISTORY_MAX_AGE` | `90d` | remove finished runs and activity-log days older than this (`d` or Go durations; `0` keeps them) |
 | `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |
@@ -457,6 +460,51 @@ that declare them**. Runwarden's own process environment holds none of them.
 The example runner *Check Credentials* shows which secrets a run receives (lengths and
 fingerprints only).
 
+## Kubernetes clusters per environment
+
+Runwarden, not the script, chooses the cluster a run talks to: for a runner with
+`"kubernetes": true`, choosing the environment *is* choosing the cluster. Concurrent runs in
+different environments never share or overwrite a kube context.
+
+- **Where**: `KUBE_DIR/<environment>/config`, one kubeconfig per environment (Helm
+  `kube.environments: {<environment>: <Secret name>}`, the Secret holding the key `config`).
+  The environments with a cluster are simply the directories that exist: add one with a Secret,
+  a Helm values entry and the environment in the runner configs, no release. Several
+  environments may share a cluster, each with its own namespace in the context.
+- **File**: YAML or JSON, at most 256 KiB; its `current-context` must exist and is the one
+  pinned (other contexts in the file are ignored). Paths in it (certificate files, exec plugin
+  command) must be absolute or a command on `PATH`. Runwarden treats the file as opaque and never
+  logs it; whatever its exec plugin needs (e.g. `kubelogin` with a service principal's client id
+  and secret) comes from the same environment's *Secrets* as ordinary environment variables, so
+  declare them in the runner's `secrets`.
+- **Run**: Runwarden writes the kubeconfig to the run's private HOME (`$KUBECONFIG`, mode 0600)
+  with the context renamed to the environment name, and sets
+  `RUNWARDEN_KUBE_CONTEXT=<environment>`. A run with a `source` environment gets both contexts,
+  the target current, and `RUNWARDEN_KUBE_SOURCE_CONTEXT=<source>`. Dropdown helpers get the
+  cluster of the environment their inputs select (none before one is chosen). Runners without the
+  flag get no kubeconfig. Needs `RUN_HOME=per-run`.
+- **Missing**: an environment without a usable kubeconfig refuses such runs (`409`, audited); a
+  run that targets several environments at once cannot get a cluster. The Admin area's
+  **Secrets** tab lists each environment's cluster server, namespace and context (never
+  credentials), unusable files, and runners that miss a cluster somewhere; `check-config` warns
+  about environment values without a kubeconfig when `KUBE_DIR` is set.
+- **Rotation**: the file is read at every start, so an updated Secret applies without a restart.
+- **Isolation**: this pins the cluster; it does not contain a misused script. All runs share one
+  user ID, so a script can read files meant for other environments; give each environment's
+  credentials only the rights its scripts need.
+
+Migrating a script: drop `az aks get-credentials` (and the `az login` it needed), set
+`"kubernetes": true` in its runner config and use `kubectl` as is, or
+`kubectl --context "$RUNWARDEN_KUBE_SOURCE_CONTEXT"` for the source cluster. Calling
+`get-credentials` still works, but it only changes the run's private copy; it is deprecated.
+
+```bash
+# Ops, per environment: a kubeconfig that logs in with the environment's service principal
+az aks get-credentials -g rg-prod -n aks-prod -f config
+kubelogin convert-kubeconfig -l spn --kubeconfig config   # reads AAD_SERVICE_PRINCIPAL_CLIENT_ID/_SECRET
+kubectl create secret generic runwarden-kube-production --from-file=config
+```
+
 ## API
 
 JSON over HTTP. Errors look like `{"error": "...", "details": ["..."]}`; validation errors name
@@ -555,7 +603,7 @@ helm install runwarden oci://ghcr.io/catalinmuraru/charts/runwarden \
   --set auth.publicUrl=https://runwarden.example.com \
   --set auth.gitlab.url=https://gitlab.example.com --set auth.gitlab.clientId=... \
   --set existingSecret=runwarden-env \
-  --set secrets.environments.production=runwarden-secrets-production \
+  --set secrets.environments.production=runwarden-secrets-production   --set kube.environments.production=runwarden-kube-production \
   --set ingress.enabled=true --set ingress.host=runwarden.example.com
 ```
 
@@ -616,6 +664,8 @@ Pushing a tag `vX.Y.Z` on `main` builds and publishes the multi-arch image
 - Script secrets are bound to environments and scripts: a run gets only the secrets its config
   declares, of the environment it may run in; they are masked in output, history and audit, which
   record only their names.
+- Runs get the kubeconfig of their environment only, chosen by Runwarden; this prevents mistakes,
+  not a misused script reading another environment's files (all runs share one user ID).
 - The container runs as non-root with a read-only root filesystem and no capabilities.
 
 ## Tech stack

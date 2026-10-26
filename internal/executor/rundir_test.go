@@ -86,7 +86,7 @@ func TestCapturePrivateHome(t *testing.T) {
 	root := t.TempDir()
 	e := New(Limits{}, EnvPolicy{TempRoot: root, PrivateHome: true})
 	script, _ := filepath.Abs("testdata/home.sh")
-	out, err := e.Capture(context.Background(), []string{script, "helper", "0"}, t.TempDir(), nil)
+	out, err := e.Capture(context.Background(), []string{script, "helper", "0"}, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +95,65 @@ func TestCapturePrivateHome(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(root); len(entries) != 0 {
 		t.Errorf("helper dir not removed: %v", entries)
+	}
+}
+
+func kubeRequest(t *testing.T, sleep string, kube *Kube) Request {
+	t.Helper()
+	s := testScript(t, "kube.sh")
+	s.Command = append(s.Command, sleep)
+	return Request{Script: s, Kube: kube}
+}
+
+func TestKubeconfigPerRun(t *testing.T) {
+	root, skel := t.TempDir(), t.TempDir()
+	// A kubeconfig from the skeleton is replaced, not kept.
+	_ = os.MkdirAll(filepath.Join(skel, ".kube"), 0o700)
+	_ = os.WriteFile(filepath.Join(skel, ".kube", "config"), []byte("skeleton"), 0o600)
+	e := New(Limits{}, EnvPolicy{TempRoot: root, PrivateHome: true, HomeSkeleton: skel})
+	dev := mustStart(t, e, kubeRequest(t, "0.5", &Kube{Config: []byte("dev-config"),
+		Env: map[string]string{"RUNWARDEN_KUBE_CONTEXT": "development"}}))
+	prod := mustStart(t, e, kubeRequest(t, "0", &Kube{Config: []byte("prod-config"),
+		Env: map[string]string{"RUNWARDEN_KUBE_CONTEXT": "production", "RUNWARDEN_KUBE_SOURCE_CONTEXT": "development"}}))
+	plain := mustStart(t, e, kubeRequest(t, "0", nil))
+	waitDone(t, prod)
+	waitDone(t, dev)
+	waitDone(t, plain)
+
+	for r, want := range map[*Run]string{
+		dev:   "context=development source=unset\nmode=600\nconfig=dev-config\n",
+		prod:  "context=production source=development\nmode=600\nconfig=prod-config\n",
+		plain: "context= source=unset\nmode=600\nconfig=skeleton\n",
+	} {
+		if out := outputOf(r); !strings.Contains(out, want) {
+			t.Errorf("run %s: want %q in\n%s", r.ID, want, out)
+		}
+	}
+}
+
+func TestKubeconfigNeedsPrivateHome(t *testing.T) {
+	kube := &Kube{Config: []byte("x")}
+	for _, p := range []EnvPolicy{{}, {TempRoot: t.TempDir()}} {
+		e := New(Limits{}, p)
+		if _, err := e.Start(kubeRequest(t, "0", kube)); !errors.Is(err, ErrNoPrivateHome) {
+			t.Errorf("%+v: Start = %v, want ErrNoPrivateHome", p, err)
+		}
+		if _, err := e.Capture(t.Context(), []string{"true"}, t.TempDir(), nil, kube); !errors.Is(err, ErrNoPrivateHome) {
+			t.Errorf("%+v: Capture = %v, want ErrNoPrivateHome", p, err)
+		}
+	}
+}
+
+func TestCaptureKubeconfig(t *testing.T) {
+	e := New(Limits{}, EnvPolicy{TempRoot: t.TempDir(), PrivateHome: true})
+	script, _ := filepath.Abs("testdata/kube.sh")
+	out, err := e.Capture(t.Context(), []string{script, "0"}, t.TempDir(), nil,
+		&Kube{Config: []byte("helper-config"), Env: map[string]string{"RUNWARDEN_KUBE_CONTEXT": "acceptance"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "context=acceptance source=unset\nmode=600\nconfig=helper-config\n"; string(out) != want {
+		t.Errorf("helper output %q, want %q", out, want)
 	}
 }
 

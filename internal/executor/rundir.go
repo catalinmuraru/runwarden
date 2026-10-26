@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,8 +13,12 @@ import (
 // prepareRunDir creates the private directory of one run (or helper call) under
 // EnvPolicy.TempRoot and returns it with the variables pointing into it: TMPDIR always, and with
 // PrivateHome also HOME, KUBECONFIG and AZURE_CONFIG_DIR, so credentials and contexts written by
-// one run are invisible to every other. dir is empty when TempRoot is not set.
-func (p EnvPolicy) prepareRunDir(name string) (dir string, vars map[string]string, err error) {
+// one run are invisible to every other. dir is empty when TempRoot is not set. kube (may be nil)
+// is written to KUBECONFIG, which needs a private HOME.
+func (p EnvPolicy) prepareRunDir(name string, kube *Kube) (dir string, vars map[string]string, err error) {
+	if kube != nil && (p.TempRoot == "" || !p.PrivateHome) {
+		return "", nil, ErrNoPrivateHome
+	}
 	if p.TempRoot == "" {
 		return "", nil, nil
 	}
@@ -38,8 +43,40 @@ func (p EnvPolicy) prepareRunDir(name string) (dir string, vars map[string]strin
 		vars["HOME"] = home
 		vars["KUBECONFIG"] = filepath.Join(home, ".kube", "config")
 		vars["AZURE_CONFIG_DIR"] = filepath.Join(home, ".azure")
+		if kube != nil {
+			if err := writeKubeconfig(vars["KUBECONFIG"], kube.Config); err != nil {
+				_ = os.RemoveAll(dir)
+				return "", nil, fmt.Errorf("run kubeconfig: %w", err)
+			}
+			for k, v := range kube.Env {
+				vars[k] = v
+			}
+		}
 	}
 	return dir, vars, nil
+}
+
+// ErrNoPrivateHome refuses a kubeconfig when runs share HOME: it would be visible to, and
+// overwritten by, every other run.
+var ErrNoPrivateHome = errors.New("executor: a kubeconfig needs a private HOME per run")
+
+// writeKubeconfig writes data to path (0600), replacing a kubeconfig from the home skeleton.
+func writeKubeconfig(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // inside the run's own directory
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // copySkeleton copies the regular files and directories of src into dst. Symlinks (to files or

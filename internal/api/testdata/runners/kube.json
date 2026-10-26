@@ -1,0 +1,15 @@
+{
+  "name": "Kube",
+  "script_path": "testdata/scripts/kube.sh",
+  "working_directory": ".",
+  "tags": ["ops"],
+  "kubernetes": true,
+  "environment_parameters": { "From": "source", "To": "target" },
+  "parameters": [
+    { "name": "From", "type": "list", "values": ["dev", "prod"] },
+    { "name": "To", "type": "list", "values": ["dev", "prod"] },
+    { "name": "Wait", "type": "text", "default": "0", "env_var": "WAIT" },
+    { "name": "Context", "type": "list", "values": { "script": "testdata/scripts/kube_values.sh ${To}" } },
+    { "name": "Any", "type": "list", "values": { "script": "testdata/scripts/kube_values.sh" } }
+  ]
+}

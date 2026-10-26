@@ -75,6 +75,12 @@ func (e *testEnv) identify(h http.Header) {
 
 func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 	t.Helper()
+	return setupEnv(t, limits, executor.EnvPolicy{}, opts)
+}
+
+// setupEnv is setup with an environment policy for the executor.
+func setupEnv(t *testing.T, limits executor.Limits, env executor.EnvPolicy, opts Options) *testEnv {
+	t.Helper()
 	base, err := filepath.Abs(".")
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +96,7 @@ func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ex := executor.New(limits, executor.EnvPolicy{})
+	ex := executor.New(limits, env)
 	opts.BaseDir, opts.DataDir = base, data
 	if opts.MaxUploadBytes == 0 {
 		opts.MaxUploadBytes = 1 << 20

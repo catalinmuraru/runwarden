@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/auth"
+	"github.com/catalinmuraru/runwarden/internal/executor"
 )
 
 // errHelpersBusy means too many helper scripts (dropdown values, defaults) are running.
@@ -99,10 +100,11 @@ func (h *helpers) put(key string, out []byte, now time.Time) {
 }
 
 // capture runs a helper command through the executor, within the helper limits and cache.
-// Failures are not cached. secrets (of the environment the helper works on) are part of the
-// cache key, so output computed with one environment's credentials is not reused for another.
-func (s *Server) capture(ctx context.Context, args []string, dir string, secrets map[string]string) ([]byte, error) {
-	key := dir + "\x00" + strings.Join(args, "\x00") + "\x00" + fingerprint(secrets)
+// Failures are not cached. secrets and the kubeconfig (of the environment the helper works on)
+// are part of the cache key, so output computed with one environment's credentials or cluster
+// is not reused for another.
+func (s *Server) capture(ctx context.Context, args []string, dir string, secrets map[string]string, kc *executor.Kube) ([]byte, error) {
+	key := dir + "\x00" + strings.Join(args, "\x00") + "\x00" + fingerprint(secrets) + "\x00" + kubeFingerprint(kc)
 	now := time.Now()
 	if out, ok := s.helpers.get(key, now); ok {
 		return out, nil
@@ -113,7 +115,7 @@ func (s *Server) capture(ctx context.Context, args []string, dir string, secrets
 		return nil, errHelpersBusy
 	}
 	defer s.helpers.release(user)
-	out, err := s.exec.Capture(ctx, args, dir, secrets)
+	out, err := s.exec.Capture(ctx, args, dir, secrets, kc)
 	if err != nil {
 		return nil, err
 	}
@@ -136,4 +138,14 @@ func fingerprint(secrets map[string]string) string {
 		h.Write([]byte(n + "=" + secrets[n] + "\x00"))
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// kubeFingerprint identifies a kubeconfig and its context variables without keeping them.
+func kubeFingerprint(kc *executor.Kube) string {
+	if kc == nil {
+		return ""
+	}
+	h := sha256.New()
+	h.Write(kc.Config)
+	return hex.EncodeToString(h.Sum(nil)) + fingerprint(kc.Env)
 }

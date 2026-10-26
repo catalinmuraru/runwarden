@@ -263,6 +263,10 @@ func (l *loader) build(file string, obj map[string]json.RawMessage) (*Script, er
 	if len(s.Secrets) > 0 && len(s.EnvironmentParameters) == 0 {
 		l.warnf(file, "secrets are declared but no environment parameter: runs get only the common secrets")
 	}
+	s.Kubernetes = bool(raw.Kubernetes)
+	if s.Kubernetes && !slices.Contains(slices.Collect(maps.Values(s.EnvironmentParameters)), EnvTarget) {
+		return nil, errors.New("kubernetes: needs a target environment parameter (the environment chooses the cluster)")
+	}
 	return s, nil
 }
 

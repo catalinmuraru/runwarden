@@ -60,6 +60,12 @@ export interface ScriptDetail extends ScriptSummary {
   access: Record<string, Access> // per environment ("-": scripts without environments)
 }
 
+export interface RunCluster {
+  environment: string
+  server: string
+  namespace?: string
+}
+
 export interface RunMeta {
   id: string
   script: string
@@ -75,6 +81,7 @@ export interface RunMeta {
   terminal?: boolean // ran on a pseudo-terminal (input is echoed by the terminal)
   environments?: string[] // "-" for runs of scripts without environments
   secrets?: string[] // names of the secrets the run received
+  clusters?: RunCluster[] // Kubernetes clusters the run was pinned to, target first
   can_control?: boolean // only on a single run: may send input, stop and kill
 }
 
@@ -168,6 +175,15 @@ export interface SecretsOverview {
   available: Record<string, string[]> // directory (environment or "common") → secret names
   unknown_dirs: string[] // directories that are no environment of the policy
   scripts: { name: string; secrets: string[]; missing: Record<string, string[]>; envless: boolean }[]
+  kubernetes: KubernetesOverview
+}
+
+export interface KubernetesOverview {
+  configured: boolean // KUBE_DIR set
+  // One per mounted kubeconfig: its cluster, or why it cannot be used. Never credentials.
+  clusters: { environment: string; context?: string; server?: string; namespace?: string; error?: string }[]
+  unknown_dirs: string[] // directories that are no environment of the policy
+  scripts: { name: string; missing: string[] }[] // runners with "kubernetes": true → environments without a usable kubeconfig
 }
 
 export interface ImportSummary {

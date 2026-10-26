@@ -16,6 +16,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
+	"github.com/catalinmuraru/runwarden/internal/kube"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
 )
 
@@ -35,6 +36,8 @@ type Options struct {
 	Activity *activity.Store
 	// Secrets gives runs the declared secrets of their environments.
 	Secrets secrets.Store
+	// Kube pins runs of scripts with "kubernetes": true to their environment's cluster.
+	Kube kube.Store
 	// Sessions, if set, lets admins see and revoke sign-in sessions.
 	Sessions SessionAdmin
 	// Helper scripts (dropdown values, defaults): concurrent calls per user and in total

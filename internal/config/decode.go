@@ -116,6 +116,7 @@ type rawScript struct {
 	AdminUsers       json.RawMessage   `json:"admin_users"`   // ignored: rules decide access
 	Tags             stringOrList      `json:"tags"`
 	Secrets          stringOrList      `json:"secrets"`
+	Kubernetes       flexBool          `json:"kubernetes"`
 	EnvParams        map[string]string `json:"environment_parameters"`
 	OutputFiles      []string          `json:"output_files"`
 	RedactPatterns   []string          `json:"redact_patterns"`

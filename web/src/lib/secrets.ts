@@ -19,3 +19,8 @@ export function secretCell(s: SecretsOverview['scripts'][number], column: string
 export function gapCount(o: SecretsOverview): number {
   return o.scripts.reduce((n, s) => n + Object.values(s.missing).filter((m) => m.length).length, 0)
 }
+
+/** Number of Kubernetes runner × environment combinations that cannot run for lack of a usable kubeconfig. */
+export function kubeGapCount(o: SecretsOverview): number {
+  return o.kubernetes.scripts.reduce((n, s) => n + s.missing.length, 0)
+}

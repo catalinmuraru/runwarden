@@ -130,6 +130,14 @@ onBeforeUnmount(() => {
         <dt>Secrets</dt>
         <dd title="Given to the script and masked in its output">{{ meta.secrets.join(', ') }}</dd>
       </template>
+      <template v-if="meta.clusters?.length">
+        <dt>Kubernetes</dt>
+        <dd title="The script's KUBECONFIG holds these clusters, one context per environment">
+          <div v-for="c in meta.clusters" :key="c.environment">
+            {{ c.environment }}: <code>{{ c.server }}</code><template v-if="c.namespace"> (namespace {{ c.namespace }})</template>
+          </div>
+        </dd>
+      </template>
       <dt>Started</dt>
       <dd>{{ formatDateTime(meta.started) }}</dd>
       <dt>Duration</dt>
