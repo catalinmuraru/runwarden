@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/params"
 )
@@ -19,7 +20,12 @@ type Options struct {
 	// BaseDir resolves relative script, working directory, include and file_dir paths.
 	// Empty means the process working directory.
 	BaseDir string
+	// MaxTimeout is the largest per-script timeout accepted; zero means DefaultMaxTimeout.
+	MaxTimeout time.Duration
 }
+
+// DefaultMaxTimeout bounds per-script timeouts, so a typo cannot keep a run going for days.
+const DefaultMaxTimeout = 24 * time.Hour
 
 // Issue is a problem found in one config file.
 type Issue struct {
@@ -66,7 +72,7 @@ func LoadDir(dir string, opts Options) (*Catalog, error) {
 		return nil, fmt.Errorf("%s is not a directory", dir)
 	}
 
-	l := &loader{base: base, cat: &Catalog{}, sources: map[string]string{}}
+	l := &loader{base: base, maxTimeout: opts.MaxTimeout, cat: &Catalog{}, sources: map[string]string{}}
 	//nolint:gosec // dir is chosen by the operator, not by users
 	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -86,9 +92,10 @@ func LoadDir(dir string, opts Options) (*Catalog, error) {
 }
 
 type loader struct {
-	base    string
-	cat     *Catalog
-	sources map[string]string // script name -> file that defined it
+	base       string
+	maxTimeout time.Duration
+	cat        *Catalog
+	sources    map[string]string // script name -> file that defined it
 }
 
 func (l *loader) errorf(file, format string, args ...any) {
@@ -200,6 +207,16 @@ func (l *loader) build(file string, obj map[string]json.RawMessage) (*Script, er
 		Scheduling:       raw.Scheduling != nil && bool(raw.Scheduling.Enabled),
 		SourceFile:       file,
 		IncludeTemplates: templates,
+	}
+	if raw.Timeout != nil {
+		t, maxT := time.Duration(*raw.Timeout), l.maxTimeout
+		if maxT <= 0 {
+			maxT = DefaultMaxTimeout
+		}
+		if t <= 0 || t > maxT {
+			return nil, fmt.Errorf("timeout: must be between 1s and %s, got %s", maxT, t)
+		}
+		s.Timeout = t
 	}
 	for _, pattern := range raw.RedactPatterns {
 		re, err := regexp.Compile(pattern)

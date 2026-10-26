@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/params"
 )
@@ -228,6 +229,42 @@ func TestLoadErrorsDoNotBlockOtherFiles(t *testing.T) {
 	}
 	if s := cat.Script("Templated"); s == nil || !slices.Equal(s.IncludeTemplates, []string{"${Env}.json"}) {
 		t.Errorf("include template not recorded: %+v", s)
+	}
+}
+
+func TestTimeout(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"none.json":    `{"name": "None", "script_path": "run.sh"}`,
+		"string.json":  `{"name": "String", "script_path": "run.sh", "timeout": "4h"}`,
+		"minutes.json": `{"name": "Minutes", "script_path": "run.sh", "timeout": 90}`,
+		"quoted.json":  `{"name": "Quoted", "script_path": "run.sh", "timeout": "45"}`,
+		"bad.json":     `{"name": "Bad", "script_path": "run.sh", "timeout": "soon"}`,
+		"zero.json":    `{"name": "Zero", "script_path": "run.sh", "timeout": 0}`,
+		"huge.json":    `{"name": "Huge", "script_path": "run.sh", "timeout": "3h"}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cat, err := LoadDir(dir, Options{BaseDir: dir, MaxTimeout: 4 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]time.Duration{"None": 0, "String": 4 * time.Hour, "Minutes": 90 * time.Minute, "Quoted": 45 * time.Minute, "Huge": 3 * time.Hour}
+	for name, d := range want {
+		if s := cat.Script(name); s == nil || s.Timeout != d {
+			t.Errorf("%s: timeout = %+v, want %s", name, s, d)
+		}
+	}
+	if len(cat.Errors) != 2 {
+		t.Errorf("errors = %v, want bad.json and zero.json", cat.Errors)
+	}
+
+	cat, _ = LoadDir(dir, Options{BaseDir: dir, MaxTimeout: 2 * time.Hour})
+	if cat.Script("Huge") != nil || cat.Script("String") != nil {
+		t.Error("timeouts above the maximum must be refused")
 	}
 }
 

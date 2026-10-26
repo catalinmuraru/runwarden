@@ -4,6 +4,7 @@
   "working_directory": ".",
   "description": "Creates a database backup. Exercises every parameter type that takes a `param` option.",
   "group": "Databases",
+  "timeout": "2h",
   "allowed_users": ["@dba", "@ops"],
   "admin_users": ["@ops"],
   "parameters": [

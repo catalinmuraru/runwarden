@@ -49,6 +49,7 @@ type paramView struct {
 type scriptView struct {
 	scriptSummary
 	RequiresTerminal bool        `json:"requires_terminal"`
+	TimeoutSeconds   int64       `json:"timeout_seconds"` // the run is stopped after this long
 	Parameters       []paramView `json:"parameters"`
 }
 
@@ -75,6 +76,7 @@ func (s *Server) getScript(w http.ResponseWriter, r *http.Request) {
 	view := scriptView{
 		scriptSummary:    scriptSummary{Name: sc.Name, Group: sc.Group, Description: sc.Description},
 		RequiresTerminal: sc.RequiresTerminal,
+		TimeoutSeconds:   int64(s.exec.Timeout(sc.Timeout).Seconds()),
 		Parameters:       []paramView{},
 	}
 	for _, p := range sc.Parameters {

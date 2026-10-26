@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync/atomic"
 	"time"
 )
 
@@ -130,4 +131,45 @@ func Log(ctx context.Context, e Event) {
 		msg = e.Action + " " + outcome
 	}
 	slog.Default().LogAttrs(ctx, level, msg, attrs...)
+
+	if fn := sink.Load(); fn != nil {
+		(*fn)(Record{
+			Time: time.Now().UTC(), Action: e.Action, Outcome: outcome, Reason: e.Reason, Message: msg,
+			User: e.User, Groups: e.Groups, SourceIP: e.SourceIP, UserAgent: e.UserAgent,
+			RunID: e.RunID, Script: e.Script, Status: e.Status, Values: e.Values, Args: e.Args,
+			ExitCode: e.ExitCode, DurationMS: e.Duration.Milliseconds(), Count: e.Count,
+		})
+	}
+}
+
+// Record is an audit event as kept by the in-app activity log (see SetSink).
+type Record struct {
+	Time       time.Time      `json:"time"`
+	Action     string         `json:"action"`
+	Outcome    string         `json:"outcome"`
+	Reason     string         `json:"reason,omitempty"`
+	Message    string         `json:"message,omitempty"`
+	User       string         `json:"user,omitempty"`
+	Groups     []string       `json:"groups,omitempty"`
+	SourceIP   string         `json:"source_ip,omitempty"`
+	UserAgent  string         `json:"user_agent,omitempty"`
+	RunID      string         `json:"run_id,omitempty"`
+	Script     string         `json:"script,omitempty"`
+	Status     string         `json:"status,omitempty"`
+	Values     map[string]any `json:"values,omitempty"`
+	Args       []string       `json:"args,omitempty"`
+	ExitCode   *int           `json:"exit_code,omitempty"`
+	DurationMS int64          `json:"duration_ms,omitempty"`
+	Count      int            `json:"count,omitempty"`
+}
+
+var sink atomic.Pointer[func(Record)]
+
+// SetSink also hands every event to fn (nil stops it). fn must not block for long.
+func SetSink(fn func(Record)) {
+	if fn == nil {
+		sink.Store(nil)
+		return
+	}
+	sink.Store(&fn)
 }

@@ -20,6 +20,10 @@ func checkConfig(args []string, out io.Writer) int {
 		return 1
 	}
 	for _, s := range cat.Scripts {
+		if s.Timeout > 0 {
+			_, _ = fmt.Fprintf(out, "ok       %s (%d parameters, timeout %s)\n", s.Name, len(s.Parameters), s.Timeout)
+			continue
+		}
 		_, _ = fmt.Fprintf(out, "ok       %s (%d parameters)\n", s.Name, len(s.Parameters))
 	}
 	for _, w := range cat.Warnings {

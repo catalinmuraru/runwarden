@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // flexBool accepts true/false or a string; strings are true only when equal to "true"
@@ -41,6 +42,34 @@ func (n *flexInt) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("expected an integer, got %s", data)
 	}
 	*n = flexInt(v)
+	return nil
+}
+
+// flexDuration accepts a Go duration string ("90m", "4h") or a number of minutes.
+type flexDuration time.Duration
+
+func (d *flexDuration) UnmarshalJSON(data []byte) error {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	switch t := v.(type) {
+	case float64:
+		*d = flexDuration(time.Duration(t * float64(time.Minute)))
+	case string:
+		s := strings.TrimSpace(t)
+		if m, err := strconv.ParseFloat(s, 64); err == nil {
+			*d = flexDuration(time.Duration(m * float64(time.Minute)))
+			return nil
+		}
+		parsed, err := time.ParseDuration(s)
+		if err != nil {
+			return fmt.Errorf("expected a duration like \"90m\" or a number of minutes, got %s", data)
+		}
+		*d = flexDuration(parsed)
+	default:
+		return fmt.Errorf("expected a duration like \"90m\" or a number of minutes, got %s", data)
+	}
 	return nil
 }
 
@@ -88,6 +117,7 @@ type rawScript struct {
 	OutputFiles      []string          `json:"output_files"`
 	RedactPatterns   []string          `json:"redact_patterns"`
 	RequiresTerminal *flexBool         `json:"requires_terminal"`
+	Timeout          *flexDuration     `json:"timeout"`
 	Scheduling       *rawScheduling    `json:"scheduling"`
 	Hidden           flexBool          `json:"hidden"`
 	Include          stringOrList      `json:"include"`

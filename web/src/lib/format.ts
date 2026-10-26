@@ -49,3 +49,12 @@ export function groupScripts<T extends { name: string; group?: string }>(scripts
     .sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
     .map(([g, list]) => [g || 'Other', list.sort((x, y) => x.name.localeCompare(y.name))])
 }
+
+/** A length of time in seconds, e.g. "4h", "1h 30m", "45m", "30s". */
+export function formatSeconds(total: number): string {
+  if (!Number.isFinite(total) || total <= 0) return ''
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = Math.floor(total % 60)
+  return [h && `${h}h`, m && `${m}m`, s && `${s}s`].filter(Boolean).join(' ')
+}

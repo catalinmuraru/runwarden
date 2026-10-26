@@ -5,6 +5,8 @@ import { api, ApiError, type Option, type ScriptDetail } from '../api'
 import ParamField from '../components/ParamField.vue'
 import { buildRunBody, dependencyQuery, fieldErrors, initialValue, type FieldValue } from '../lib/form'
 import { renderMarkdown } from '../lib/markdown'
+import { formatSeconds } from '../lib/format'
+import { refreshRunning } from '../lib/running'
 
 const props = defineProps<{ name: string }>()
 const router = useRouter()
@@ -88,6 +90,7 @@ async function run() {
   formErrors.value = []
   try {
     const { id } = await api.startRun(props.name, buildRunBody(script.value.parameters, values, touched))
+    refreshRunning()
     await router.push({ name: 'run', params: { id } })
   } catch (e) {
     if (e instanceof ApiError && e.status === 400) {
@@ -116,6 +119,7 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
     <h1>{{ script.name }}</h1>
     <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown escapes everything first -->
     <div v-if="script.description" class="description" v-html="renderMarkdown(script.description)" />
+    <p v-if="script.timeout_seconds" class="muted small">Runs are stopped automatically after {{ formatSeconds(script.timeout_seconds) }}.</p>
 
     <form class="card stack" style="margin-top: 1rem" novalidate @submit.prevent="run">
       <div v-if="script.parameters.length" class="form-grid">

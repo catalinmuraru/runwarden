@@ -134,3 +134,20 @@ dl.meta dd { margin: 0; overflow-wrap: anywhere; }
   h1 { font-size: 1.3rem; }
   .terminal-wrap { height: 50vh; }
 }
+
+.app-header nav .count {
+  display: inline-block; margin-left: 0.3rem; min-width: 1.2rem; padding: 0 0.3rem; border-radius: 999px;
+  background: var(--info); color: var(--surface); font-size: 0.75rem; font-weight: 700; text-align: center;
+}
+.tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin: 0.75rem 0 1rem; }
+.tabs button {
+  font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+  padding: 0.4rem 0.75rem; cursor: pointer;
+}
+.tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+.filters { margin-bottom: 1rem; }
+.filters label { display: flex; align-items: center; gap: 0.35rem; font-weight: normal; }
+.filters input, .filters select { max-width: 12rem; }
+.small { font-size: 0.85rem; }
+.table-wrap { overflow-x: auto; }
+.table-wrap td { overflow-wrap: anywhere; }

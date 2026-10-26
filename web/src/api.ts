@@ -41,6 +41,7 @@ export interface Param {
 
 export interface ScriptDetail extends ScriptSummary {
   requires_terminal: boolean
+  timeout_seconds: number // the run is stopped after this long
   parameters: Param[]
 }
 
@@ -57,6 +58,54 @@ export interface RunMeta {
   output_truncated?: boolean
   files?: string[]
   terminal?: boolean // ran on a pseudo-terminal (input is echoed by the terminal)
+}
+
+export interface RunFilter {
+  script?: string
+  user?: string
+  status?: string
+  limit?: number
+}
+
+export interface AdminUser {
+  name: string
+  groups?: string[]
+  first_seen: string
+  last_seen: string
+  last_login?: string
+  signed_out?: string
+  last_ip?: string
+  status: 'active' | 'signed-in' | 'signed-out'
+  runs: number
+  running: number
+  admin: boolean
+}
+
+export interface ActivityEvent {
+  time: string
+  action: string
+  outcome: 'success' | 'failure'
+  reason?: string
+  message?: string
+  user?: string
+  groups?: string[]
+  source_ip?: string
+  run_id?: string
+  script?: string
+  status?: string
+  values?: Record<string, unknown>
+  args?: string[]
+  exit_code?: number
+  duration_ms?: number
+  count?: number
+}
+
+export interface ActivityFilter {
+  user?: string
+  action?: string
+  outcome?: string
+  script?: string
+  limit?: number
 }
 
 export interface FileEntry {
@@ -140,13 +189,17 @@ export const api = {
   startRun: (script: string, body: Record<string, unknown> | FormData) =>
     request<{ id: string }>('POST', `/api/scripts/${enc(script)}/runs`, body instanceof FormData ? body : { values: body }),
 
-  runs: async (script?: string) => (await request<{ runs: RunMeta[] }>('GET', `/api/runs${query({ script })}`)).runs,
+  runs: async (f: RunFilter = {}) =>
+    (await request<{ runs: RunMeta[] }>('GET', `/api/runs${query({ ...f, limit: f.limit?.toString() })}`)).runs,
   run: (id: string) => request<RunMeta>('GET', `/api/runs/${enc(id)}`),
   input: (id: string, line: string, secret = false) => request<void>('POST', `/api/runs/${enc(id)}/input`, { line, secret }),
   closeInput: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/input`, { close: true }),
   stop: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/stop`),
   kill: (id: string) => request<void>('POST', `/api/runs/${enc(id)}/kill`),
   fileURL: (id: string, name: string) => `/api/runs/${enc(id)}/files/${enc(name)}`,
+  adminUsers: async () => (await request<{ users: AdminUser[] }>('GET', '/api/admin/users')).users,
+  activity: async (f: ActivityFilter = {}) =>
+    (await request<{ events: ActivityEvent[] }>('GET', `/api/admin/activity${query({ ...f, limit: f.limit?.toString() })}`)).events,
   socketURL: (id: string, offset: number) => {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${proto}//${location.host}/api/runs/${enc(id)}/ws?offset=${offset}`

@@ -16,7 +16,9 @@ single binary and container image and is meant to run on Kubernetes.
 - **Live output** streamed to an in-browser terminal over WebSocket, with stop and kill.
 - **History**: execution logs and metadata kept on disk.
 - **Authentication** via OIDC, GitLab or LDAP; per-script allowed users, groups and admins.
-- **Audit log** of who ran what with which parameters.
+- **Audit log** of who ran what with which parameters, also browsable by admins in the UI.
+- **Admin overview**: everyone's runs, who is signed in, and the activity log.
+- **Browser notifications** when your runs finish.
 
 ## Web UI
 
@@ -27,8 +29,16 @@ single binary and container image and is meant to run on Kubernetes.
 - **Run page**: live terminal with colours, an input line for scripts that ask questions, Stop and
   Kill, the masked arguments and values, downloadable output files, and "Run again" with the same
   values. Reloading or losing the connection resumes the output where it stopped.
-- **History**: runs you may see (your own; all runs of scripts you administer), filterable by
-  script.
+- **Running**: runs in progress, with Stop — your own, or every run on the server for global
+  admins. The header shows how many are running.
+- **History**: runs you may see (your own; all runs of scripts you administer; everything for
+  global admins), filterable by script, status and (admins) user.
+- **Admin** (global admins only): **Users** — everyone who signed in, their groups, status
+  (active now / signed in / signed out), last activity, last sign-in, address and run counts;
+  **Activity** — the audit trail (runs, input, stop/kill, sign-ins, reloads, clean-ups),
+  filterable by user, action, result and script.
+- **Notifications**: the bell in the header turns on browser notifications for your own runs
+  (needs HTTPS or localhost). They arrive while a Runwarden tab is open, even in the background.
 
 The UI is a Vue 3 single-page app embedded in the binary and served with a strict
 Content-Security-Policy.
@@ -56,7 +66,9 @@ scanned too). See [examples/runners/](examples/runners/) for complete examples.
 
 **Script fields:** `name`, `script_path` (path plus optional fixed arguments, never run
 through a shell), `working_directory`, `description`, `group`, `allowed_users` / `admin_users`
-(user names, `@group` or `*`), `output_files` (globs offered for download), `requires_terminal`,
+(user names, `@group` or `*`), `output_files` (globs offered for download), `timeout` (this
+script's time limit, e.g. `"4h"` or a number of minutes; default `RUN_TIMEOUT`, at most
+`RUN_TIMEOUT_MAX`), `requires_terminal`,
 `scheduling.enabled`, `include` (merge parameters from other files), `hidden` (only usable as an
 include).
 
@@ -120,7 +132,7 @@ go run ./cmd/runwarden check-config path/to/runners
 | Limit | Default |
 |---|---|
 | Concurrent runs | 10 |
-| Run time | 60 minutes |
+| Run time | 60 minutes, or the script's `timeout` |
 | Grace between `SIGTERM` and `SIGKILL` | 10 seconds |
 | Stored output per run | 10 MiB (the script keeps running; output is marked truncated) |
 
@@ -136,13 +148,14 @@ All settings come from environment variables. Secrets are never read from files.
 | `DATA_DIR` | `./data` | run history and temporary uploads |
 | `MAX_CONCURRENT_RUNS` | `10` | runs beyond this are rejected with `429` |
 | `RUN_TIMEOUT` | `60m` | default time limit per run |
+| `RUN_TIMEOUT_MAX` | `24h` | largest `timeout` a runner config may set (larger values are a config error) |
 | `KILL_GRACE` | `10s` | wait between `SIGTERM` and `SIGKILL` |
 | `MAX_OUTPUT_BYTES` | `10Mi` | stored output per run (`Ki`, `Mi`, `Gi` suffixes) |
 | `MAX_UPLOAD_BYTES` | `100Mi` | maximum upload request size |
 | `ALLOWED_ORIGINS` | – | extra hosts allowed to open WebSockets, comma-separated (`ops.example.com,*.example.org`); the server's own host is always allowed |
 | `RUNNER_ENV_<NAME>` | – | passed to scripts as `<NAME>` |
 | `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
-| `HISTORY_MAX_AGE` | `90d` | remove finished runs older than this (`d` or Go durations; `0` keeps them) |
+| `HISTORY_MAX_AGE` | `90d` | remove finished runs and activity-log days older than this (`d` or Go durations; `0` keeps them) |
 | `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |
 
 Send `SIGHUP` to reload runner configs without a restart. `GET /healthz` is liveness;
@@ -176,6 +189,10 @@ as one JSON string, so arbitrary parameter names can't explode the index mapping
 ```json
 {"@timestamp":"2026-10-25T04:03:11.765Z","log.level":"info","message":"run 20261025-040310.753-0001 of \"Restart Service\" by alice: finished (exit code 0)","ecs.version":"8.11.0","service":{"name":"runwarden","version":"0.2.0"},"event":{"kind":"event","category":["process"],"type":["end"],"action":"run-end","outcome":"success","dataset":"runwarden.audit","duration":1010455273},"user":{"name":"alice","roles":["ops"]},"source":{"ip":"198.51.100.23"},"process":{"exit_code":0,"args":["--service","api","--timeout","30"]},"runwarden":{"run":{"id":"20261025-040310.753-0001","status":"finished","parameters":"{\"Service\":\"api\",\"Timeout seconds\":\"30\"}"},"script":{"name":"Restart Service"}}}
 ```
+
+The same audit events are also kept in `DATA_DIR/activity/` (one JSON-lines file per day, plus
+`users.json` for the users index) for the Admin pages, and removed after `HISTORY_MAX_AGE`. The
+log on stdout stays the system of record.
 
 ### Filebeat
 
@@ -250,7 +267,8 @@ Who may do what, from each runner config:
 | `allowed_users` | who may see and run the script: user names, `@group`, or `*` for every signed-in user. Missing means everyone; an empty list means only admins. |
 | `admin_users` | who may see and stop every run of the script. Missing means only global admins. |
 
-Users always see and control their own runs. Global admins may do everything. Names and groups
+Users always see and control their own runs. Global admins (`ADMIN_USERS`, `ADMIN_GROUPS`) may
+do everything: run every script, see and control every run, and open the Admin pages. Names and groups
 match case-insensitively. Scripts and runs a user may not see answer `404`. The signed-in user
 is passed to scripts as `RUNWARDEN_USER`.
 
@@ -279,7 +297,9 @@ the parameter but never echo the submitted value.
 | `GET /api/scripts/{name}` | script with its parameters (form description) |
 | `GET /api/scripts/{name}/parameters/{param}/values?Other=value` | allowed values; for script-provided lists, pass the parameters it depends on |
 | `POST /api/scripts/{name}/runs` | start a run: JSON `{"values": {...}}`, or `multipart/form-data` with a `values` JSON field plus one file per `file_upload` parameter. `201 {"id"}`, `400` invalid values, `429` busy |
-| `GET /api/runs?script=&limit=` | run history, newest first |
+| `GET /api/runs?script=&user=&status=&limit=` | runs you may see, newest first; `status=running` lists runs in progress |
+| `GET /api/admin/users` | global admins: known users, their status and run counts |
+| `GET /api/admin/activity?user=&action=&outcome=&script=&since=&until=&limit=` | global admins: audit events, newest first (`since`/`until` in RFC 3339) |
 | `GET /api/runs/{id}` | run status and details (secure values masked) |
 | `GET /api/runs/{id}/output?offset=N` | output from byte `N`; `X-Next-Offset` and `X-Run-Finished` headers |
 | `POST /api/runs/{id}/input` | `{"line": "yes"}` writes a line to stdin; `{"close": true}` closes stdin |
@@ -452,6 +472,8 @@ internal/config/   runner config loader
 internal/params/   parameter model, validation, argument/env/stdin building
 internal/executor/ process lifecycle, output, stdin, limits
 internal/history/  run records on disk
+internal/activity/ in-app activity log and users index (admin pages)
+internal/audit/    audit events (ECS)
 internal/api/      REST and WebSocket API
 internal/auth/     sign-in (OIDC, GitLab, LDAP) and sessions
 internal/authz/    who may run scripts and see runs

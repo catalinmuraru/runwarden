@@ -78,6 +78,14 @@ func New(limits Limits, env EnvPolicy) *Executor {
 
 func logger() *slog.Logger { return slog.Default().With("component", "executor") }
 
+// Timeout returns the timeout a run gets when its script asks for d (zero: the default).
+func (e *Executor) Timeout(d time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return e.limits.Timeout
+}
+
 // Start launches a run. It returns ErrBusy when too many runs are in progress.
 func (e *Executor) Start(req Request) (*Run, error) {
 	if req.Script == nil || len(req.Script.Command) == 0 {
@@ -176,10 +184,7 @@ func (e *Executor) start(req Request) (*Run, error) {
 		child = outW
 	}
 
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = e.limits.Timeout
-	}
+	timeout := e.Timeout(req.Timeout)
 	m := newMasker(inv.SecureValues, s.RedactPatterns)
 	r := &Run{
 		ID:         id,
@@ -232,6 +237,19 @@ func (e *Executor) Get(id string) *Run {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.runs[id]
+}
+
+// Running returns the IDs of runs still in progress.
+func (e *Executor) Running() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var ids []string
+	for id, r := range e.runs {
+		if r.Result().Status == StatusRunning {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // Forget drops a finished run from memory. Running runs are kept.

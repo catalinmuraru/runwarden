@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/params"
 )
@@ -24,9 +25,11 @@ type Script struct {
 	// prints that are not parameters (e.g. generated passwords).
 	RedactPatterns   []*regexp.Regexp
 	RequiresTerminal bool
-	Scheduling       bool
-	Parameters       []*params.Parameter
-	SourceFile       string
+	// Timeout overrides the global run timeout for this script; zero means the global one.
+	Timeout    time.Duration
+	Scheduling bool
+	Parameters []*params.Parameter
+	SourceFile string
 
 	// IncludeTemplates are includes that depend on parameter values (contain "${").
 	// They are resolved once values are known.

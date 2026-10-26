@@ -45,6 +45,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- $l := .Values.limits -}}
 {{- $_ := set $e "MAX_CONCURRENT_RUNS" (toString $l.maxConcurrentRuns) -}}
 {{- $_ := set $e "RUN_TIMEOUT" (toString $l.runTimeout) -}}
+{{- $_ := set $e "RUN_TIMEOUT_MAX" (toString $l.runTimeoutMax) -}}
 {{- $_ := set $e "KILL_GRACE" (toString $l.killGrace) -}}
 {{- $_ := set $e "MAX_OUTPUT_BYTES" (toString $l.maxOutputBytes) -}}
 {{- $_ := set $e "MAX_UPLOAD_BYTES" (toString $l.maxUploadBytes) -}}

@@ -47,7 +47,10 @@ existingSecret: ""
 
 limits:
   maxConcurrentRuns: 10
+  # Default run timeout. A runner config can set its own "timeout" (e.g. "4h" for a database
+  # clone), up to runTimeoutMax.
   runTimeout: 60m
+  runTimeoutMax: 24h
   killGrace: 10s
   maxOutputBytes: 10Mi
   maxUploadBytes: 100Mi
