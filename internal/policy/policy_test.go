@@ -152,6 +152,7 @@ func TestValidate(t *testing.T) {
 	tests := map[string]func(p *Policy){
 		"duplicate environment": func(p *Policy) { p.Environments = append(p.Environments, Environment{Name: "Production"}) },
 		"bad pattern":           func(p *Policy) { p.Environments[0].Match = []string{"[dev"} },
+		"reserved name":         func(p *Policy) { p.Environments[0].Name = "Common" },
 		"unknown env not found": func(p *Policy) { p.UnknownEnvironment = "staging" },
 		"rule unknown role": func(p *Policy) {
 			p.Rules = []Rule{{Role: "x", Scripts: []string{Any}, Environments: []string{Any}, Access: Run}}

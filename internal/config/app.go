@@ -35,6 +35,7 @@ type App struct {
 	MaxRunsPerUser    int           // MAX_RUNS_PER_USER, default 1; 0 means no per-user limit
 	RunHome           string        // RUN_HOME: "per-run" (default) or "shared"
 	HomeSkeleton      string        // HOME_SKELETON: directory copied into every per-run HOME
+	SecretsDir        string        // SECRETS_DIR, default "/etc/runwarden/secrets"; <dir>/<environment>/<NAME>
 	ValuesMaxPerUser  int           // VALUES_MAX_PER_USER, default 2; concurrent dropdown helpers per user
 	ValuesMaxGlobal   int           // VALUES_MAX_GLOBAL, default 10
 	ValuesCacheTTL    time.Duration // VALUES_CACHE_TTL, default 60s; 0 disables the cache
@@ -235,6 +236,7 @@ func LoadApp(getenv func(string) string) (App, error) {
 	if app.RunHome != RunHomePerRun && app.RunHome != RunHomeShared {
 		errs = append(errs, fmt.Errorf("RUN_HOME: unknown value %q (want per-run or shared)", app.RunHome))
 	}
+	app.SecretsDir = dir("SECRETS_DIR", "/etc/runwarden/secrets")
 	if raw := str("HOME_SKELETON", ""); raw != "" {
 		app.HomeSkeleton = dir("HOME_SKELETON", raw)
 		if info, err := os.Stat(app.HomeSkeleton); err != nil || !info.IsDir() {

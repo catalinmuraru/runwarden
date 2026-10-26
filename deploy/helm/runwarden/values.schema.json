@@ -30,6 +30,17 @@
         "adminGroups": { "description": "removed: groups no longer grant rights" }
       }
     },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "common": { "type": "string" },
+        "environments": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$", "not": { "enum": ["common"] } },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "policy": {
       "type": "object",
       "properties": {

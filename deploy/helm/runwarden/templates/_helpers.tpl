@@ -79,6 +79,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- fail (printf "auth.%s was removed: set auth.initialAdmin=true, sign in as the built-in administrator and give the devops role to the first user in the Admin area" $old) -}}
 {{- end -}}
 {{- end -}}
+{{- $_ := set $e "SECRETS_DIR" "/etc/runwarden/secrets" -}}
 {{- $p := .Values.policy -}}
 {{- with $p.environments }}{{ $_ := set $e "POLICY_ENVIRONMENTS" (toJson .) }}{{ end -}}
 {{- with $p.unknownEnvironment }}{{ $_ := set $e "POLICY_UNKNOWN_ENVIRONMENT" . }}{{ end -}}

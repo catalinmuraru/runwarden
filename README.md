@@ -42,7 +42,8 @@ single binary and container image and is meant to run on Kubernetes.
   from the identity provider (for reference), status, last activity, address, runs and sessions,
   and users given roles before their first sign-in; **Roles**; **Rules** per role;
   **Exceptions** (active and ended); **Environments** (with a box to test which environment a
-  value belongs to); **Access** — what a user or role may do, script by environment, and which
+  value belongs to); **Secrets** — which declared secrets each environment has or misses (names
+  only); **Access** — what a user or role may do, script by environment, and which
   rule grants it; **Activity** — the audit trail (runs, input, stop/kill, sign-ins, policy
   changes, reloads, clean-ups), filterable by user, action, result and script. **Export policy**
   downloads the policy as YAML; **Import policy** replaces it after showing what changes.
@@ -78,7 +79,8 @@ scanned too). See [examples/runners/](examples/runners/) for complete examples.
 
 **Script fields:** `name`, `script_path` (path plus optional fixed arguments, never run
 through a shell), `working_directory`, `description`, `group`, `tags` (the script's audience, used
-by access rules as `tag:<tag>`), `environment_parameters` (see *Access control*), `output_files` (globs offered for download), `timeout` (this
+by access rules as `tag:<tag>`), `environment_parameters` (see *Access control*), `secrets` (names of
+the secrets a run receives, see *Secrets*), `output_files` (globs offered for download), `timeout` (this
 script's time limit, e.g. `"4h"` or a number of minutes; default `RUN_TIMEOUT`, at most
 `RUN_TIMEOUT_MAX`), `requires_terminal`,
 `scheduling.enabled`, `include` (merge parameters from other files), `hidden` (only usable as an
@@ -151,9 +153,10 @@ go run ./cmd/runwarden check-config path/to/runners
 - Environment: scripts never inherit Runwarden's environment. They get `PATH`, `HOME`, `LANG`,
   `TZ` (defaults `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
   `LANG=C.UTF-8`), every `RUNNER_ENV_<NAME>` variable as `<NAME>`, `EXECUTION_ID`,
-  `RUNWARDEN_USER` (who started the run), `TMPDIR`, `TERM` on a terminal, and their parameter
-  variables. Parameters cannot set `PATH`, `HOME`, `IFS`, `ENV`, `BASH_ENV`, `LD_*`,
-  `RUNWARDEN_USER`, `TMPDIR`, `TERM` and similar variables.
+  `RUNWARDEN_USER` (who started the run), `TMPDIR`, `TERM` on a terminal, their parameter
+  variables and the secrets they declare (see *Secrets*). Parameters cannot set `PATH`, `HOME`,
+  `IFS`, `ENV`, `BASH_ENV`, `LD_*`, `RUNWARDEN_USER`, `TMPDIR`, `TERM`, a declared secret and
+  similar variables.
 
 | Limit | Default |
 |---|---|
@@ -179,7 +182,8 @@ All settings come from environment variables. Secrets are never read from files.
 | `MAX_OUTPUT_BYTES` | `10Mi` | stored output per run (`Ki`, `Mi`, `Gi` suffixes) |
 | `MAX_UPLOAD_BYTES` | `100Mi` | maximum upload request size |
 | `ALLOWED_ORIGINS` | – | extra hosts allowed to open WebSockets, comma-separated (`ops.example.com,*.example.org`); the server's own host is always allowed |
-| `RUNNER_ENV_<NAME>` | – | passed to scripts as `<NAME>` |
+| `RUNNER_ENV_<NAME>` | – | passed to every script as `<NAME>`: for settings, **not secrets** (the server warns about names that look like secrets) |
+| `SECRETS_DIR` | `/etc/runwarden/secrets` | secrets per environment, see *Secrets* |
 | `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
 | `HISTORY_MAX_AGE` | `90d` | remove finished runs and activity-log days older than this (`d` or Go durations; `0` keeps them) |
 | `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |
@@ -416,6 +420,43 @@ After the upgrade everyone is a guest: enable the built-in administrator, give t
 the first user, turn the built-in administrator off, and let that user give roles and add rules
 (tag the scripts in their configs first).
 
+## Secrets
+
+Secrets for scripts (API tokens, passwords) are bound to an **environment** and to the **scripts
+that declare them**. Runwarden's own process environment holds none of them.
+
+- **Where**: `SECRETS_DIR/<environment>/<NAME>` and `SECRETS_DIR/common/<NAME>`, one file per
+  secret: the layout of a mounted Kubernetes Secret (Helm `secrets.environments` and
+  `secrets.common`). Create the Secrets outside the chart, e.g. with External Secrets or sealed
+  secrets. Directory names are the environment names of the access policy; the Admin area's
+  **Secrets** tab shows directories that match no environment. One trailing newline is removed.
+- **Who gets what**: a runner config lists the names it needs, e.g.
+  `"secrets": ["DB_PASSWORD", "API_TOKEN"]`. A run receives exactly those, as environment
+  variables, from the environment it runs in (its `target` environment parameter), falling back
+  to `common`. Scripts that declare nothing receive no secrets. Starting a run needs run access to
+  that environment (see *Access control*), so a developer never receives production secrets
+  unless a rule or an exception allows running there.
+- **Two environments**: a run with a `source` environment (e.g. copy production → development)
+  also gets the source's own values as `SOURCE_<NAME>` (values from `common` are not repeated).
+  Starting it needs only *view* access to the source, so give view on sensitive environments only
+  to roles that may hold their secrets, or let such scripts declare no secrets.
+- **Missing**: if a declared secret exists neither in the environment nor in `common`, the run is
+  refused (`409`, audited) instead of starting without credentials; the Secrets tab lists such
+  gaps per script and environment. A run that targets several environments at once cannot get
+  secrets.
+- **Masking and records**: every secret value is masked in the run's output, history and live
+  stream (even when printed), and in dropdown helpers' output. History and audit events record the
+  names only (`runwarden.secrets`); the run page lists them.
+- **Dropdown helpers** of a script get its secrets for the environment their inputs select (view
+  access to it is required anyway).
+- **Rotation**: files are read at every start, so updated Kubernetes Secrets apply without a
+  restart (after the kubelet refreshes the volume).
+- `RUNNER_ENV_<NAME>` still reaches every script in every environment: use it for settings, not
+  secrets. The server warns at start about such variables whose names look like secrets.
+
+The example runner *Check Credentials* shows which secrets a run receives (lengths and
+fingerprints only).
+
 ## API
 
 JSON over HTTP. Errors look like `{"error": "...", "details": ["..."]}`; validation errors name
@@ -432,6 +473,7 @@ the parameter but never echo the submitted value.
 | `GET /api/admin/activity?user=&action=&outcome=&script=&since=&until=&limit=` | devops: audit events, newest first (`since`/`until` in RFC 3339) |
 | `GET /api/admin/policy` | devops: the access policy, warnings, scripts with their tags and environment parameters |
 | `PUT /api/admin/policy/environments`, `POST`/`PUT`/`DELETE /api/admin/policy/roles[/{name}]`, `PUT /api/admin/policy/users/{name}`, `POST`/`PUT`/`DELETE /api/admin/policy/rules[/{id}]`, `POST`/`DELETE /api/admin/policy/exceptions[/{id}]` | devops: change the policy. Every change sends the `revision` it is based on (`DELETE`: `?revision=`); a stale one answers `409` |
+| `GET /api/admin/secrets` | devops: secret names per environment and `common`, and per script the declared secrets missing in each environment (never values) |
 | `GET /api/admin/policy/effective?user=` or `?role=` | devops: resulting access per script and environment, with the rule or exception that grants it |
 | `GET /api/admin/policy/export`, `POST /api/admin/policy/import[?dry_run=true]` | devops: the policy as YAML; import replaces it (`dry_run` only validates and summarizes) |
 | `GET /api/runs/{id}` | run status and details (secure values masked), its `environments`, and `can_control` |
@@ -504,14 +546,16 @@ COPY scripts/ /opt/runwarden/scripts/
 ```bash
 kubectl create secret generic runwarden-env \
   --from-literal=SESSION_KEY="$(openssl rand -base64 32)" \
-  --from-literal=GITLAB_CLIENT_SECRET=... \
-  --from-literal=RUNNER_ENV_API_TOKEN=...      # passed to scripts as API_TOKEN
+  --from-literal=GITLAB_CLIENT_SECRET=...
+# Script secrets: one Secret per environment (see "Secrets"), e.g.
+kubectl create secret generic runwarden-secrets-production --from-literal=DB_PASSWORD=...
 
 helm install runwarden oci://ghcr.io/catalinmuraru/charts/runwarden \
   --set image.repository=registry.example.com/my-scripts --set image.tag=1.0.0 \
   --set auth.publicUrl=https://runwarden.example.com \
   --set auth.gitlab.url=https://gitlab.example.com --set auth.gitlab.clientId=... \
   --set existingSecret=runwarden-env \
+  --set secrets.environments.production=runwarden-secrets-production \
   --set ingress.enabled=true --set ingress.host=runwarden.example.com
 ```
 
@@ -542,6 +586,8 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
 - **Sign-in**: `auth.methods` (default `[gitlab]`; e.g. `[gitlab, ldap]`), `auth.gitlab.url`
   for your GitLab, `auth.gitlab.requiredGroup`, `auth.initialAdmin`. `[none]` must be confirmed with
   `auth.allowNoAuth: true`. (`auth.type` was replaced by `auth.methods`; the chart says so.)
+- **Secrets**: `secrets.common` and `secrets.environments` (environment → Secret name), mounted
+  read-only (0440) under `/etc/runwarden/secrets/`.
 - **Access**: `policy.environments`, `policy.unknownEnvironment` and `policy.maxExceptionDays`.
   The first devops user is made by the built-in administrator (`auth.initialAdmin`);
   `auth.adminUsers` and `auth.adminGroups` were removed (the chart fails with a hint).
@@ -567,7 +613,9 @@ Pushing a tag `vX.Y.Z` on `main` builds and publishes the multi-arch image
 - Every parameter is validated server-side.
 - Each run gets its own process group, so stopping a run stops all of its children.
 - Limits on concurrent runs, output size and run time.
-- Secrets are read from environment variables only and are masked in logs, history and audit.
+- Script secrets are bound to environments and scripts: a run gets only the secrets its config
+  declares, of the environment it may run in; they are masked in output, history and audit, which
+  record only their names.
 - The container runs as non-root with a read-only root filesystem and no capabilities.
 
 ## Tech stack
@@ -625,6 +673,7 @@ internal/audit/    audit events (ECS)
 internal/api/      REST and WebSocket API
 internal/auth/     sign-in (OIDC, GitLab, LDAP) and sessions
 internal/policy/   access policy: roles, environments, rules, exceptions (stored as JSON)
+internal/secrets/  secrets per environment, read from mounted Secrets
 internal/authz/    who may see and run scripts and see and control runs
 internal/web/      embedded UI (built into internal/web/dist/)
 web/               Vue 3 + Vite + TypeScript source

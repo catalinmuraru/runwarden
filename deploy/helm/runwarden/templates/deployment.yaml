@@ -103,6 +103,16 @@ spec:
               mountPath: /etc/runwarden/home-skeleton
               readOnly: true
             {{- end }}
+            {{- with .Values.secrets.common }}
+            - name: secrets-common
+              mountPath: /etc/runwarden/secrets/common
+              readOnly: true
+            {{- end }}
+            {{- range $i, $env := keys .Values.secrets.environments | sortAlpha }}
+            - name: secrets-{{ $i }}
+              mountPath: /etc/runwarden/secrets/{{ $env }}
+              readOnly: true
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -132,6 +142,18 @@ spec:
         - name: home-skeleton
           configMap:
             name: {{ . }}
+        {{- end }}
+        {{- with .Values.secrets.common }}
+        - name: secrets-common
+          secret:
+            secretName: {{ . }}
+            defaultMode: 288 # 0440: readable by the pod's group (fsGroup), not by others
+        {{- end }}
+        {{- range $i, $env := keys .Values.secrets.environments | sortAlpha }}
+        - name: secrets-{{ $i }}
+          secret:
+            secretName: {{ index $.Values.secrets.environments $env }}
+            defaultMode: 288
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

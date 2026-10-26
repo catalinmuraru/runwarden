@@ -251,10 +251,44 @@ func (l *loader) build(file string, obj map[string]json.RawMessage) (*Script, er
 	if err := l.environmentParameters(file, s, raw.EnvParams); err != nil {
 		return nil, err
 	}
+	for _, name := range raw.Secrets {
+		name = strings.TrimSpace(name)
+		if err := checkSecretName(name); err != nil {
+			return nil, fmt.Errorf("secrets: %w", err)
+		}
+		if !slices.Contains(s.Secrets, name) {
+			s.Secrets = append(s.Secrets, name)
+		}
+	}
+	if len(s.Secrets) > 0 && len(s.EnvironmentParameters) == 0 {
+		l.warnf(file, "secrets are declared but no environment parameter: runs get only the common secrets")
+	}
 	return s, nil
 }
 
-var tagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+var (
+	tagPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	secretPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+)
+
+// checkSecretName refuses names that are not environment variables, would change how scripts
+// run, or collide with the SOURCE_ prefix of source-environment secrets.
+func checkSecretName(name string) error {
+	switch {
+	case !secretPattern.MatchString(name):
+		return fmt.Errorf("%q must be an upper-case variable name (A-Z, 0-9, _)", name)
+	case strings.HasPrefix(name, "SOURCE_"):
+		return fmt.Errorf("%q: the SOURCE_ prefix is added for the source environment's secrets", name)
+	case strings.HasPrefix(name, "LD_"), strings.HasPrefix(name, "BASH_"), strings.HasPrefix(name, "RUNWARDEN_"):
+		return fmt.Errorf("%q is reserved", name)
+	}
+	switch name {
+	case "PATH", "HOME", "IFS", "ENV", "SHELLOPTS", "BASHOPTS", "PS4", "PROMPT_COMMAND", "TMPDIR", "TERM", "LANG", "TZ",
+		"KUBECONFIG", "AZURE_CONFIG_DIR":
+		return fmt.Errorf("%q is reserved", name)
+	}
+	return nil
+}
 
 // environmentParameters checks environment_parameters and warns about parameters that look like
 // they select an environment but are not declared (access rules would not see them).

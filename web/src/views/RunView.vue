@@ -126,6 +126,10 @@ onBeforeUnmount(() => {
         <dt>Environments</dt>
         <dd>{{ meta.environments.join(', ') }}</dd>
       </template>
+      <template v-if="meta.secrets?.length">
+        <dt>Secrets</dt>
+        <dd title="Given to the script and masked in its output">{{ meta.secrets.join(', ') }}</dd>
+      </template>
       <dt>Started</dt>
       <dd>{{ formatDateTime(meta.started) }}</dd>
       <dt>Duration</dt>

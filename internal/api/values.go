@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -96,9 +99,10 @@ func (h *helpers) put(key string, out []byte, now time.Time) {
 }
 
 // capture runs a helper command through the executor, within the helper limits and cache.
-// Failures are not cached.
-func (s *Server) capture(ctx context.Context, args []string, dir string) ([]byte, error) {
-	key := dir + "\x00" + strings.Join(args, "\x00")
+// Failures are not cached. secrets (of the environment the helper works on) are part of the
+// cache key, so output computed with one environment's credentials is not reused for another.
+func (s *Server) capture(ctx context.Context, args []string, dir string, secrets map[string]string) ([]byte, error) {
+	key := dir + "\x00" + strings.Join(args, "\x00") + "\x00" + fingerprint(secrets)
 	now := time.Now()
 	if out, ok := s.helpers.get(key, now); ok {
 		return out, nil
@@ -109,10 +113,27 @@ func (s *Server) capture(ctx context.Context, args []string, dir string) ([]byte
 		return nil, errHelpersBusy
 	}
 	defer s.helpers.release(user)
-	out, err := s.exec.Capture(ctx, args, dir)
+	out, err := s.exec.Capture(ctx, args, dir, secrets)
 	if err != nil {
 		return nil, err
 	}
 	s.helpers.put(key, out, now)
 	return out, nil
+}
+
+// fingerprint identifies a set of secrets without keeping their values.
+func fingerprint(secrets map[string]string) string {
+	if len(secrets) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(secrets))
+	for n := range secrets {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	h := sha256.New()
+	for _, n := range names {
+		h.Write([]byte(n + "=" + secrets[n] + "\x00"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

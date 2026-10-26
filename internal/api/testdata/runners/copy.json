@@ -1,0 +1,13 @@
+{
+  "name": "Copy",
+  "script_path": "testdata/scripts/secrets.sh",
+  "working_directory": ".",
+  "tags": ["ops"],
+  "secrets": ["DB_PASSWORD", "PRIVATE_TOKEN"],
+  "environment_parameters": { "From": "source", "To": "target" },
+  "parameters": [
+    { "name": "From", "type": "list", "values": ["dev", "prod"], "default": "prod" },
+    { "name": "To", "type": "list", "values": ["dev", "prod"], "default": "dev" },
+    { "name": "Check", "type": "list", "values": { "script": "testdata/scripts/secret_values.sh ${To}" } }
+  ]
+}

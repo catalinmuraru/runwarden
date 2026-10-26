@@ -30,6 +30,9 @@ func checkConfig(args []string, out io.Writer) int {
 		if len(s.Tags) > 0 {
 			details = append(details, "tags "+strings.Join(s.Tags, ", "))
 		}
+		if len(s.Secrets) > 0 {
+			details = append(details, "secrets "+strings.Join(s.Secrets, ", "))
+		}
 		for _, name := range slices.Sorted(maps.Keys(s.EnvironmentParameters)) {
 			details = append(details, fmt.Sprintf("environment from %q (%s)", name, s.EnvironmentParameters[name]))
 		}

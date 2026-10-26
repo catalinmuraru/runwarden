@@ -85,13 +85,26 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
+	// Only the secrets the script declares, from the environments it touches (checked above).
+	sec, err := s.resolveSecrets(sc, uses)
+	switch {
+	case secretRefusal(err):
+		refused(err.Error())
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	case err != nil:
+		slog.Error("resolve secrets", "script", sc.Name, "err", err)
+		refused("could not read secrets")
+		writeError(w, http.StatusInternalServerError, "could not start the run")
+		return
+	}
 	if problems := s.checkDynamicValues(r, sc, raw, values); len(problems) > 0 {
 		refused("invalid parameters: " + strings.Join(problems, "; "))
 		writeError(w, http.StatusBadRequest, "invalid parameters", problems...)
 		return
 	}
 
-	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout})
+	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout, Secrets: sec.Env})
 	switch {
 	case errors.Is(err, executor.ErrUserBusy):
 		refused("user already has a run in progress")
@@ -114,8 +127,10 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	// who started it now.
 	end := audit.Event{Action: audit.RunEnd, Category: "process", Type: "end", RunID: run.ID, Script: sc.Name,
 		User: user.Name, Roles: s.opts.Access.Roles(user), Groups: user.Groups, AuthMethod: user.Method,
-		SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(), Values: masked, Args: run.MaskedArgs, Environments: envs}
-	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Environments: envs, Terminal: run.Terminal}
+		SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(), Values: masked, Args: run.MaskedArgs, Environments: envs,
+		Secrets: sec.Names()}
+	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Environments: envs,
+		Secrets: sec.Names(), Terminal: run.Terminal}
 	files := history.OutputFiles{Patterns: sc.OutputFiles, Dir: sc.WorkingDirectory}
 	err = s.hist.Track(run, meta, files, func() {
 		res := run.Result()
@@ -139,7 +154,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r, audit.Event{Action: audit.RunStart, Category: "process", Type: "start", Success: true,
-		RunID: run.ID, Script: sc.Name, Values: masked, Args: run.MaskedArgs, Environments: envs,
+		RunID: run.ID, Script: sc.Name, Values: masked, Args: run.MaskedArgs, Environments: envs, Secrets: sec.Names(),
 		Message: fmt.Sprintf("run %s of %q started by %s", run.ID, sc.Name, user.Name)})
 
 	w.Header().Set("Location", "/api/runs/"+run.ID)

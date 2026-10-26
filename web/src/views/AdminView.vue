@@ -9,6 +9,7 @@ import EnvironmentsTab from './admin/EnvironmentsTab.vue'
 import ExceptionsTab from './admin/ExceptionsTab.vue'
 import RolesTab from './admin/RolesTab.vue'
 import RulesTab from './admin/RulesTab.vue'
+import SecretsTab from './admin/SecretsTab.vue'
 import UsersTab from './admin/UsersTab.vue'
 
 const route = useRoute()
@@ -21,6 +22,7 @@ const tabs = [
   { id: 'exceptions', label: 'Exceptions' },
   { id: 'environments', label: 'Environments' },
   { id: 'access', label: 'Access' },
+  { id: 'secrets', label: 'Secrets' },
   { id: 'activity', label: 'Activity' },
 ] as const
 type Tab = (typeof tabs)[number]['id']
@@ -123,5 +125,6 @@ onMounted(loadPolicy)
   <RulesTab v-else-if="tab === 'rules'" :role="q('role')" />
   <ExceptionsTab v-else-if="tab === 'exceptions'" :user="q('user')" />
   <EnvironmentsTab v-else-if="tab === 'environments'" />
+  <SecretsTab v-else-if="tab === 'secrets'" />
   <AccessTab v-else-if="tab === 'access'" :user="q('user')" :role="q('role')" @select="(w) => show('access', w as Record<string, string>)" />
 </template>

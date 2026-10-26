@@ -39,6 +39,7 @@ type Meta struct {
 	Args            []string       `json:"args"`
 	Values          map[string]any `json:"values,omitempty"`
 	Environments    []string       `json:"environments,omitempty"` // environments the run touches ("-" for none)
+	Secrets         []string       `json:"secrets,omitempty"`      // names of the secrets the run received
 	Status          string         `json:"status"`
 	ExitCode        *int           `json:"exit_code,omitempty"`
 	Started         time.Time      `json:"started"`

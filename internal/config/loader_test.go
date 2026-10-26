@@ -65,7 +65,7 @@ func TestLoadExamples(t *testing.T) {
 	cat := loadExamples(t)
 	root := repoRoot(t)
 
-	want := []string{"Backup Database", "Disk Usage Report", "Restart Service", "🗂️ Rotate Logs"}
+	want := []string{"Backup Database", "Check Credentials", "Disk Usage Report", "Restart Service", "🗂️ Rotate Logs"}
 	if got := scriptNames(cat); !slices.Equal(got, want) {
 		t.Fatalf("scripts = %q, want %q (hidden include target must not be listed)", got, want)
 	}
@@ -369,4 +369,38 @@ func TestCompat(t *testing.T) {
 		t.Errorf("error: %s", e)
 	}
 	t.Logf("%d scripts loaded", len(cat.Scripts))
+}
+
+func TestSecretsField(t *testing.T) {
+	dir := t.TempDir()
+	env := `"environment_parameters": {"Env": "target"}, "parameters": [{"name": "Env", "type": "list", "values": ["dev"]}]`
+	files := map[string]string{
+		"ok.json":       `{"name": "Ok", "script_path": "run.sh", "secrets": ["PRIVATE_TOKEN", " DB_PASSWORD ", "PRIVATE_TOKEN"], ` + env + `}`,
+		"single.json":   `{"name": "Single", "script_path": "run.sh", "secrets": "CF_API_TOKEN"}`,
+		"lower.json":    `{"name": "Lower", "script_path": "run.sh", "secrets": ["token"]}`,
+		"reserved.json": `{"name": "Reserved", "script_path": "run.sh", "secrets": ["PATH"]}`,
+		"prefix.json":   `{"name": "Prefix", "script_path": "run.sh", "secrets": ["SOURCE_DB"]}`,
+		"ld.json":       `{"name": "Ld", "script_path": "run.sh", "secrets": ["LD_PRELOAD"]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cat, err := LoadDir(dir, Options{BaseDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := cat.Script("Ok"); s == nil || !slices.Equal(s.Secrets, []string{"PRIVATE_TOKEN", "DB_PASSWORD"}) {
+		t.Errorf("ok = %+v", s)
+	}
+	if s := cat.Script("Single"); s == nil || !slices.Equal(s.Secrets, []string{"CF_API_TOKEN"}) {
+		t.Errorf("single = %+v", s)
+	}
+	if len(cat.Errors) != 4 {
+		t.Errorf("errors = %v", cat.Errors)
+	}
+	if len(cat.Warnings) != 1 || !strings.Contains(cat.Warnings[0].Msg, "only the common secrets") || filepath.Base(cat.Warnings[0].File) != "single.json" {
+		t.Errorf("warnings = %v", cat.Warnings)
+	}
 }

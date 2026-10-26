@@ -24,7 +24,9 @@ type Script struct {
 	// EnvironmentParameters maps the parameters that select an environment to their use:
 	// EnvTarget (needs run access there) or EnvSource (needs view access there).
 	EnvironmentParameters map[string]string
-	OutputFiles           []string // globs offered for download after a run
+	// Secrets are the names of the secrets a run receives from its environment (see package secrets).
+	Secrets     []string
+	OutputFiles []string // globs offered for download after a run
 	// RedactPatterns are regexes whose matches are masked in the output, for secrets a script
 	// prints that are not parameters (e.g. generated passwords).
 	RedactPatterns   []*regexp.Regexp
