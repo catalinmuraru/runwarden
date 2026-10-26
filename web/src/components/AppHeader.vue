@@ -49,7 +49,15 @@ async function logout() {
           {{ notifications.enabled ? '🔔' : '🔕' }}<span class="sr-only">{{ notifyTitle }}</span>
         </button>
         <span :title="session.me?.groups.join(', ')">{{ session.me?.name }}</span>
-        <span v-if="session.me?.admin" class="badge tone-info">admin</span>
+        <span
+          v-for="r in session.me?.roles ?? []"
+          :key="r"
+          class="badge"
+          :class="{ 'tone-info': r === 'devops' }"
+          title="Your role: what you may see and run"
+          >{{ r }}</span
+        >
+        <span v-if="session.me && !session.me.roles.length" class="badge" title="No role yet: ask an administrator">guest</span>
         <button v-if="session.me?.auth_type !== 'none'" class="btn btn-quiet" type="button" @click="logout">Sign out</button>
       </div>
     </div>

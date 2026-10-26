@@ -12,17 +12,26 @@ import (
 
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/runwarden/internal/policy"
 )
 
 type scriptSummary struct {
-	Name        string `json:"name"`
-	Group       string `json:"group,omitempty"`
-	Description string `json:"description,omitempty"`
+	Name        string   `json:"name"`
+	Group       string   `json:"group,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+func summary(sc *config.Script) scriptSummary {
+	return scriptSummary{Name: sc.Name, Group: sc.Group, Description: sc.Description, Tags: sc.Tags}
 }
 
 type option struct {
 	Value string `json:"value"`
 	Label string `json:"label"`
+	// For values of environment parameters: the environment and the user's access there.
+	Environment string `json:"environment,omitempty"`
+	Access      string `json:"access,omitempty"`
 }
 
 type paramView struct {
@@ -44,6 +53,8 @@ type paramView struct {
 	FileRecursive    bool     `json:"file_recursive,omitempty"`
 	FileType         string   `json:"file_type,omitempty"`
 	FileExtensions   []string `json:"file_extensions,omitempty"`
+	// Environment is "target" or "source" for parameters that select an environment.
+	Environment string `json:"environment,omitempty"`
 }
 
 type scriptView struct {
@@ -51,6 +62,9 @@ type scriptView struct {
 	RequiresTerminal bool        `json:"requires_terminal"`
 	TimeoutSeconds   int64       `json:"timeout_seconds"` // the run is stopped after this long
 	Parameters       []paramView `json:"parameters"`
+	// Access is the user's access per environment ("-" for scripts without environments);
+	// environments without access are left out.
+	Access map[string]string `json:"access"`
 }
 
 func (s *Server) listScripts(w http.ResponseWriter, r *http.Request) {
@@ -58,10 +72,10 @@ func (s *Server) listScripts(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	if c := s.catalog.Load(); c != nil {
 		for _, sc := range c.Scripts {
-			if !s.opts.Policy.CanRun(user, sc) {
+			if !s.opts.Access.CanSee(user, sc) {
 				continue
 			}
-			out = append(out, scriptSummary{Name: sc.Name, Group: sc.Group, Description: sc.Description})
+			out = append(out, summary(sc))
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"scripts": out})
@@ -73,16 +87,69 @@ func (s *Server) getScript(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown script")
 		return
 	}
+	access := s.opts.Access.ScriptAccess(currentUser(r), sc)
 	view := scriptView{
-		scriptSummary:    scriptSummary{Name: sc.Name, Group: sc.Group, Description: sc.Description},
+		scriptSummary:    summary(sc),
 		RequiresTerminal: sc.RequiresTerminal,
 		TimeoutSeconds:   int64(s.exec.Timeout(sc.Timeout).Seconds()),
 		Parameters:       []paramView{},
+		Access:           map[string]string{},
+	}
+	for env, a := range access {
+		view.Access[env] = a.String()
 	}
 	for _, p := range sc.Parameters {
-		view.Parameters = append(view.Parameters, s.paramView(r.Context(), sc, p))
+		pv := s.paramView(r.Context(), sc, p)
+		pv.Values = s.environmentOptions(sc, p, access, pv.Values)
+		view.Parameters = append(view.Parameters, pv)
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// environmentOptions keeps the values of an environment parameter that the user may at least
+// view, marked with their environment and access. Other parameters' values are unchanged.
+func (s *Server) environmentOptions(sc *config.Script, p *params.Parameter, access map[string]policy.Access, opts []option) []option {
+	if sc.EnvironmentParameters[p.Name] == "" {
+		return opts
+	}
+	pol := s.opts.Access.Policy()
+	out := []option{}
+	for _, o := range opts {
+		env := pol.Environment(o.Value)
+		if a := access[env]; a > policy.None {
+			o.Environment, o.Access = env, a.String()
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// checkEnvironmentDependencies refuses computing a parameter's values from an environment the
+// user may not view (e.g. listing production namespaces).
+func (s *Server) checkEnvironmentDependencies(r *http.Request, sc *config.Script, p *params.Parameter, raw func(string) (any, bool)) error {
+	if p.ValuesScript == "" {
+		return nil
+	}
+	access := s.opts.Access.ScriptAccess(currentUser(r), sc)
+	pol := s.opts.Access.Policy()
+	for _, name := range config.Placeholders(p.ValuesScript) {
+		dep := sc.Parameter(name)
+		if dep == nil || sc.EnvironmentParameters[name] == "" {
+			continue
+		}
+		v := dep.Default
+		if rv, ok := raw(name); ok {
+			if nv, err := dep.Normalize(rv); err == nil {
+				v = nv
+			}
+		}
+		for _, item := range valueItems(v) {
+			if env := pol.Environment(item); env != "" && access[env] == policy.None {
+				return fmt.Errorf("you have no access to environment %s", env)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) paramView(ctx context.Context, sc *config.Script, p *params.Parameter) paramView {
@@ -102,6 +169,7 @@ func (s *Server) paramView(ctx context.Context, sc *config.Script, p *params.Par
 		FileRecursive:    p.FileRecursive,
 		FileType:         string(p.FileType),
 		FileExtensions:   p.FileExtensions,
+		Environment:      sc.EnvironmentParameters[p.Name],
 	}
 	if p.NoValue {
 		v.Type = "flag"
@@ -173,8 +241,7 @@ func (s *Server) parameterValues(w http.ResponseWriter, r *http.Request) {
 		values = p.Values
 	} else {
 		q := r.URL.Query()
-		var err error
-		values, err = s.dynamicValues(r.Context(), sc, p, func(name string) (any, bool) {
+		raw := func(name string) (any, bool) {
 			if !q.Has(name) {
 				return nil, false
 			}
@@ -186,7 +253,13 @@ func (s *Server) parameterValues(w http.ResponseWriter, r *http.Request) {
 				return list, true
 			}
 			return q.Get(name), true
-		})
+		}
+		if err := s.checkEnvironmentDependencies(r, sc, p, raw); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		var err error
+		values, err = s.dynamicValues(r.Context(), sc, p, raw)
 		if err != nil {
 			writeValuesError(w, err)
 			return
@@ -196,6 +269,7 @@ func (s *Server) parameterValues(w http.ResponseWriter, r *http.Request) {
 	for _, v := range values {
 		opts = append(opts, option{Value: v, Label: label(p, v)})
 	}
+	opts = s.environmentOptions(sc, p, s.opts.Access.ScriptAccess(currentUser(r), sc), opts)
 	writeJSON(w, http.StatusOK, map[string]any{"values": opts})
 }
 

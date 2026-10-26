@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -80,8 +81,8 @@ func TestLoadExamples(t *testing.T) {
 		if s.WorkingDirectory != root {
 			t.Errorf("working dir = %q, want %q", s.WorkingDirectory, root)
 		}
-		if !slices.Equal(s.AdminUsers, []string{"@ops"}) {
-			t.Errorf("admin users = %q", s.AdminUsers)
+		if !slices.Equal(s.Tags, []string{"dba", "devops"}) || s.EnvironmentParameters != nil {
+			t.Errorf("tags = %q, environment parameters = %v", s.Tags, s.EnvironmentParameters)
 		}
 		level := mustParam(t, s, "Compression level")
 		if level.Min == nil || *level.Min != 1 || level.Max == nil || *level.Max != 9 {
@@ -265,6 +266,55 @@ func TestTimeout(t *testing.T) {
 	cat, _ = LoadDir(dir, Options{BaseDir: dir, MaxTimeout: 2 * time.Hour})
 	if cat.Script("Huge") != nil || cat.Script("String") != nil {
 		t.Error("timeouts above the maximum must be refused")
+	}
+}
+
+func TestAccessFields(t *testing.T) {
+	dir := t.TempDir()
+	param := func(name string) string { return `{"name": "` + name + `", "type": "list", "values": ["dev", "prod"]}` }
+	files := map[string]string{
+		"copy.json": `{"name": "Copy", "script_path": "run.sh", "tags": ["Developer", "devops", "developer"],
+			"environment_parameters": {"From": "source", "To": ""},
+			"parameters": [` + param("From") + `, ` + param("To") + `]}`,
+		"single_tag.json": `{"name": "Single", "script_path": "run.sh", "tags": "devops"}`,
+		"legacy.json":     `{"name": "Legacy", "script_path": "run.sh", "allowed_users": ["@ops"], "admin_users": "bob"}`,
+		"undeclared.json": `{"name": "Undeclared", "script_path": "run.sh", "parameters": [` + param("K8S_NAMESPACE") + `]}`,
+		"bad_tag.json":    `{"name": "BadTag", "script_path": "run.sh", "tags": ["two words"]}`,
+		"bad_use.json":    `{"name": "BadUse", "script_path": "run.sh", "environment_parameters": {"Env": "both"}, "parameters": [` + param("Env") + `]}`,
+		"unknown.json":    `{"name": "Unknown", "script_path": "run.sh", "environment_parameters": {"Env": "target"}}`,
+		"upload.json": `{"name": "Upload", "script_path": "run.sh", "environment_parameters": {"F": "target"},
+			"parameters": [{"name": "F", "type": "file_upload"}]}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cat, err := LoadDir(dir, Options{BaseDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cat.Script("Copy")
+	if s == nil || !slices.Equal(s.Tags, []string{"Developer", "devops"}) || !s.HasTag("DEVELOPER") ||
+		!maps.Equal(s.EnvironmentParameters, map[string]string{"From": EnvSource, "To": EnvTarget}) {
+		t.Errorf("copy = %+v", s)
+	}
+	if s := cat.Script("Single"); s == nil || !slices.Equal(s.Tags, []string{"devops"}) {
+		t.Errorf("single tag = %+v", s)
+	}
+	failed := map[string]bool{}
+	for _, e := range cat.Errors {
+		failed[filepath.Base(e.File)] = true
+	}
+	if len(cat.Errors) != 4 || !failed["bad_tag.json"] || !failed["bad_use.json"] || !failed["unknown.json"] || !failed["upload.json"] {
+		t.Errorf("errors = %v", cat.Errors)
+	}
+	warnings := map[string]string{}
+	for _, w := range cat.Warnings {
+		warnings[filepath.Base(w.File)] += w.Msg
+	}
+	if len(warnings) != 2 || !strings.Contains(warnings["legacy.json"], "ignored") || !strings.Contains(warnings["undeclared.json"], "K8S_NAMESPACE") {
+		t.Errorf("warnings = %v", cat.Warnings)
 	}
 }
 

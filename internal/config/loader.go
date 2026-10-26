@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -200,8 +201,6 @@ func (l *loader) build(file string, obj map[string]json.RawMessage) (*Script, er
 		WorkingDirectory: wd,
 		Description:      raw.Description,
 		Group:            raw.Group,
-		AllowedUsers:     raw.AllowedUsers,
-		AdminUsers:       raw.AdminUsers,
 		OutputFiles:      raw.OutputFiles,
 		RequiresTerminal: raw.RequiresTerminal == nil || bool(*raw.RequiresTerminal),
 		Scheduling:       raw.Scheduling != nil && bool(raw.Scheduling.Enabled),
@@ -237,7 +236,58 @@ func (l *loader) build(file string, obj map[string]json.RawMessage) (*Script, er
 		seen[p.Name] = true
 		s.Parameters = append(s.Parameters, p)
 	}
+	if raw.AllowedUsers != nil || raw.AdminUsers != nil {
+		l.warnf(file, "allowed_users and admin_users are ignored: roles and rules in the Admin area decide who may see and run scripts")
+	}
+	for _, tag := range raw.Tags {
+		tag = strings.TrimSpace(tag)
+		if !tagPattern.MatchString(tag) {
+			return nil, fmt.Errorf("tags: %q is not a valid tag (letters, digits, '.', '_' and '-')", tag)
+		}
+		if !s.HasTag(tag) {
+			s.Tags = append(s.Tags, tag)
+		}
+	}
+	if err := l.environmentParameters(file, s, raw.EnvParams); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+var tagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// environmentParameters checks environment_parameters and warns about parameters that look like
+// they select an environment but are not declared (access rules would not see them).
+func (l *loader) environmentParameters(file string, s *Script, declared map[string]string) error {
+	names := slices.Sorted(maps.Keys(declared))
+	for _, name := range names {
+		use := strings.ToLower(strings.TrimSpace(declared[name]))
+		switch use {
+		case "":
+			use = EnvTarget
+		case EnvTarget, EnvSource:
+		default:
+			return fmt.Errorf("environment_parameters: %q must be %q or %q, got %q", name, EnvTarget, EnvSource, declared[name])
+		}
+		p := s.Parameter(name)
+		if p == nil {
+			return fmt.Errorf("environment_parameters: unknown parameter %q", name)
+		}
+		if p.Type == params.TypeFileUpload || p.Type == params.TypeServerFile || p.NoValue {
+			return fmt.Errorf("environment_parameters: parameter %q cannot select an environment (type %s)", name, p.Type)
+		}
+		if s.EnvironmentParameters == nil {
+			s.EnvironmentParameters = map[string]string{}
+		}
+		s.EnvironmentParameters[name] = use
+	}
+	for _, p := range s.Parameters {
+		lower := strings.ToLower(p.Name)
+		if _, ok := s.EnvironmentParameters[p.Name]; !ok && (strings.Contains(lower, "env") || strings.Contains(lower, "namespace")) {
+			l.warnf(file, "parameter %q looks like it selects an environment but is not listed in environment_parameters", p.Name)
+		}
+	}
+	return nil
 }
 
 // mergeInclude adds top-level keys and parameters from an included file. Keys and parameters

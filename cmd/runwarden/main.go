@@ -23,6 +23,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
 	"github.com/catalinmuraru/runwarden/internal/logging"
+	"github.com/catalinmuraru/runwarden/internal/policy"
 	"github.com/catalinmuraru/runwarden/internal/web"
 )
 
@@ -92,15 +93,14 @@ func run() error {
 		PrivateHome:  cfg.RunHome == config.RunHomePerRun,
 		HomeSkeleton: cfg.HomeSkeleton,
 	})
-	policy := authz.Policy{
-		AdminUsers:  cfg.Auth.AdminUsers,
-		AdminGroups: cfg.Auth.AdminGroups,
-		Everyone:    cfg.Auth.NoAuth,
+	access, err := newAccess(cfg)
+	if err != nil {
+		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	authH, sessions, err := newAuth(ctx, cfg, policy, clientIP)
+	authH, sessions, err := newAuth(ctx, cfg, access, clientIP)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func run() error {
 		AllowedOrigins: cfg.AllowedOrigins,
 		ClientIP:       clientIP,
 		Authenticate:   authH.Middleware,
-		Policy:         policy,
+		Access:         access,
 		Activity:       acts,
 
 		ValuesMaxPerUser: cfg.ValuesMaxPerUser,
@@ -133,6 +133,7 @@ func run() error {
 	go reloadOnHangup(ctx, cfg, apiSrv)
 	go cleanHistory(ctx, cfg, hist, acts)
 	go flushEveryMinute(ctx, flushers...)
+	go auditExpiredExceptions(ctx, access.Store)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -180,9 +181,56 @@ func run() error {
 	return nil
 }
 
+// newAccess opens the access policy on the data volume (created from the configured
+// environments the first time).
+func newAccess(cfg config.App) (*authz.Authorizer, error) {
+	for _, w := range cfg.Access.Warnings {
+		slog.Warn("configuration", "problem", w)
+	}
+	envs := make([]policy.Environment, len(cfg.Access.Environments))
+	for i, e := range cfg.Access.Environments {
+		envs[i] = policy.Environment{Name: e.Name, Match: e.Match}
+	}
+	store, err := policy.Open(cfg.DataDir, policy.Options{
+		Environments:       envs,
+		UnknownEnvironment: cfg.Access.UnknownEnvironment,
+		Bootstrap:          cfg.Access.BootstrapDevops,
+		MaxExceptionDays:   cfg.Access.MaxExceptionDays,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("access policy: %w", err)
+	}
+	if len(cfg.Access.BootstrapDevops) > 0 {
+		slog.Info("access policy: devops from the deployment settings", "users", cfg.Access.BootstrapDevops)
+	}
+	return &authz.Authorizer{Store: store, Everyone: cfg.Auth.NoAuth}, nil
+}
+
+// auditExpiredExceptions writes an audit event when an access exception expires.
+func auditExpiredExceptions(ctx context.Context, store *policy.Store) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for {
+		expired, err := store.Sweep()
+		if err != nil {
+			slog.Error("access policy: sweep expired exceptions", "err", err)
+		}
+		for _, e := range expired {
+			audit.Log(ctx, audit.Event{Action: audit.PolicyExpiry, Category: "configuration", Type: "change", Success: true,
+				PolicyObject: "exception " + e.ID, PolicyChange: "expired",
+				Message: fmt.Sprintf("access exception %s of %s expired (reason: %s)", e.ID, e.User, e.Reason)})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
 // newAuth builds the sign-in handlers for the enabled methods and the built-in administrator.
 // The session store is nil when sign-in is disabled.
-func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, clientIP clientip.Resolver) (*auth.Handler, *auth.Store, error) {
+func newAuth(ctx context.Context, cfg config.App, access *authz.Authorizer, clientIP clientip.Resolver) (*auth.Handler, *auth.Store, error) {
 	for _, w := range cfg.Auth.Warnings {
 		slog.Warn("configuration", "problem", w)
 	}
@@ -190,7 +238,8 @@ func newAuth(ctx context.Context, cfg config.App, policy authz.Policy, clientIP 
 		NoAuth:         cfg.Auth.NoAuth,
 		AllowedOrigins: cfg.AllowedOrigins,
 		ClientIP:       clientIP,
-		IsAdmin:        policy.IsAdmin,
+		IsAdmin:        access.IsAdmin,
+		Roles:          access.Roles,
 
 		MaxFailuresPerIP:  cfg.Auth.MaxFailuresPerIP,
 		MaxFailuresGlobal: cfg.Auth.MaxFailuresGlobal,

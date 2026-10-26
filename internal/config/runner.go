@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/params"
@@ -18,9 +19,12 @@ type Script struct {
 	WorkingDirectory string
 	Description      string
 	Group            string
-	AllowedUsers     []string // user names, "@group" or "*"
-	AdminUsers       []string
-	OutputFiles      []string // globs offered for download after a run
+	// Tags name the script's audience; access rules select scripts by name or by "tag:<tag>".
+	Tags []string
+	// EnvironmentParameters maps the parameters that select an environment to their use:
+	// EnvTarget (needs run access there) or EnvSource (needs view access there).
+	EnvironmentParameters map[string]string
+	OutputFiles           []string // globs offered for download after a run
 	// RedactPatterns are regexes whose matches are masked in the output, for secrets a script
 	// prints that are not parameters (e.g. generated passwords).
 	RedactPatterns   []*regexp.Regexp
@@ -34,6 +38,22 @@ type Script struct {
 	// IncludeTemplates are includes that depend on parameter values (contain "${").
 	// They are resolved once values are known.
 	IncludeTemplates []string
+}
+
+// Uses of an environment parameter.
+const (
+	EnvTarget = "target" // the run changes this environment
+	EnvSource = "source" // the run only reads from it (e.g. the source of a copy)
+)
+
+// HasTag reports whether the script carries tag (case-insensitive).
+func (s *Script) HasTag(tag string) bool {
+	for _, t := range s.Tags {
+		if strings.EqualFold(t, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // Parameter returns the parameter with the given name, or nil.

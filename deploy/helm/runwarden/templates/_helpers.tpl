@@ -74,8 +74,15 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- $_ := set $e "SESSION_TTL" (toString $a.sessionTTL) -}}
 {{- with $a.publicUrl }}{{ $_ := set $e "PUBLIC_URL" . }}{{ end -}}
 {{- if not (kindIs "invalid" $a.cookieSecure) }}{{ $_ := set $e "COOKIE_SECURE" (toString $a.cookieSecure) }}{{ end -}}
-{{- with $a.adminUsers }}{{ $_ := set $e "ADMIN_USERS" (join "," .) }}{{ end -}}
-{{- with $a.adminGroups }}{{ $_ := set $e "ADMIN_GROUPS" (join "," .) }}{{ end -}}
+{{- if $a.adminGroups -}}
+{{- fail "auth.adminGroups was removed: groups no longer grant rights. List the first administrators in auth.bootstrapDevops and give roles in the Admin area" -}}
+{{- end -}}
+{{- $devops := concat ($a.bootstrapDevops | default list) ($a.adminUsers | default list) | uniq -}}
+{{- with $devops }}{{ $_ := set $e "BOOTSTRAP_DEVOPS" (join "," .) }}{{ end -}}
+{{- $p := .Values.policy -}}
+{{- with $p.environments }}{{ $_ := set $e "POLICY_ENVIRONMENTS" (toJson .) }}{{ end -}}
+{{- with $p.unknownEnvironment }}{{ $_ := set $e "POLICY_UNKNOWN_ENVIRONMENT" . }}{{ end -}}
+{{- $_ := set $e "POLICY_MAX_EXCEPTION_DAYS" (toString $p.maxExceptionDays) -}}
 {{- with .Values.allowedOrigins }}{{ $_ := set $e "ALLOWED_ORIGINS" (join "," .) }}{{ end -}}
 {{- with .Values.trustedProxies }}{{ $_ := set $e "TRUSTED_PROXIES" (join "," .) }}{{ end -}}
 {{- $_ := set $e "HISTORY_MAX_AGE" (toString .Values.history.maxAge) -}}

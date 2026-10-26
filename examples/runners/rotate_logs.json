@@ -5,7 +5,8 @@
   "description": "Rotates application logs.\nArguments are positional, booleans are written as strings, and the multiselect uses the legacy `multiple_arguments` option.",
   "group": "Maintenance",
   "requires_terminal": "false",
-  "allowed_users": ["*"],
+  "tags": ["developer", "devops"],
+  "environment_parameters": { "Environment": "target" },
   "parameters": [
     {
       "name": "Service",

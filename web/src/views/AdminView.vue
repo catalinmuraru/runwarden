@@ -1,197 +1,127 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, type ActivityEvent, type AdminUser } from '../api'
-import { formatDateTime } from '../lib/format'
+import { api, ApiError, type ImportSummary } from '../api'
+import { changePolicy, loadPolicy, policyState } from '../lib/policyState'
+import AccessTab from './admin/AccessTab.vue'
+import ActivityTab from './admin/ActivityTab.vue'
+import EnvironmentsTab from './admin/EnvironmentsTab.vue'
+import ExceptionsTab from './admin/ExceptionsTab.vue'
+import RolesTab from './admin/RolesTab.vue'
+import RulesTab from './admin/RulesTab.vue'
+import UsersTab from './admin/UsersTab.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-const actions = ['run-start', 'run-end', 'run-input', 'run-stop', 'run-kill', 'login', 'logout', 'session-revoke', 'config-reload', 'history-cleanup']
-const methodLabels: Record<string, string> = { gitlab: 'GitLab', oidc: 'SSO', ldap: 'LDAP', local: 'built-in' }
-const userStatus: Record<AdminUser['status'], { text: string; tone: string }> = {
-  active: { text: 'Active now', tone: 'ok' },
-  'signed-in': { text: 'Signed in', tone: 'info' },
-  'signed-out': { text: 'Signed out', tone: 'warn' },
+const tabs = [
+  { id: 'users', label: 'Users' },
+  { id: 'roles', label: 'Roles' },
+  { id: 'rules', label: 'Rules' },
+  { id: 'exceptions', label: 'Exceptions' },
+  { id: 'environments', label: 'Environments' },
+  { id: 'access', label: 'Access' },
+  { id: 'activity', label: 'Activity' },
+] as const
+type Tab = (typeof tabs)[number]['id']
+
+const q = (key: string) => (typeof route.query[key] === 'string' ? (route.query[key] as string) : undefined)
+const tab = computed<Tab>(() => tabs.find((t) => t.id === q('tab'))?.id ?? 'users')
+
+const users = ref<InstanceType<typeof UsersTab>>()
+const activity = ref<InstanceType<typeof ActivityTab>>()
+const importFile = ref<HTMLInputElement>()
+const pending = ref<{ yaml: string; summary: ImportSummary; warnings: string[] } | null>(null)
+const importError = ref('')
+
+function show(t: Tab, extra: Record<string, string> = {}) {
+  void router.replace({ query: t === 'users' ? extra : { tab: t, ...extra } })
 }
 
-const q = (key: string) => (typeof route.query[key] === 'string' ? (route.query[key] as string) : '')
-const tab = computed(() => (q('tab') === 'activity' ? 'activity' : 'users'))
-const filter = ref({ user: '', action: '', outcome: '', script: '' })
-
-const users = ref<AdminUser[]>([])
-const events = ref<ActivityEvent[]>([])
-const loading = ref(false)
-const error = ref('')
-
-function setQuery(next: Record<string, string>) {
-  const query = Object.fromEntries(Object.entries(next).filter(([, v]) => v))
-  void router.replace({ query })
+async function refresh() {
+  await loadPolicy()
+  await users.value?.load()
+  await activity.value?.load()
 }
 
-function showTab(t: 'users' | 'activity') {
-  setQuery(t === 'activity' ? { tab: t, ...filter.value } : {})
-}
-
-function applyFilter() {
-  setQuery({ tab: 'activity', ...filter.value })
-}
-
-function userActivity(name: string) {
-  filter.value = { user: name, action: '', outcome: '', script: '' }
-  applyFilter()
-}
-
-async function load() {
-  loading.value = true
-  error.value = ''
+async function chooseImport(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  importError.value = ''
   try {
-    if (tab.value === 'users') {
-      users.value = await api.adminUsers()
-    } else {
-      filter.value = { user: q('user'), action: q('action'), outcome: q('outcome'), script: q('script') }
-      events.value = await api.activity({ ...filter.value, limit: 500 })
-    }
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    const yaml = await file.text()
+    pending.value = { yaml, ...(await api.previewImport(yaml)) }
+  } catch (err) {
+    importError.value = err instanceof ApiError ? [err.message, ...err.details].join(': ') : String(err)
   } finally {
-    loading.value = false
+    if (importFile.value) importFile.value.value = ''
   }
 }
 
-async function signOutEverywhere(name: string) {
-  if (!confirm(`Sign ${name} out of every browser? They can sign in again unless their account is blocked at the identity provider.`)) return
-  error.value = ''
-  try {
-    await api.adminSignOut(name)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
-  await load()
+async function confirmImport() {
+  if (!pending.value) return
+  const yaml = pending.value.yaml
+  if (await changePolicy((rev) => api.importPolicy(rev, yaml))) pending.value = null
 }
 
-function details(e: ActivityEvent): string {
-  const parts: string[] = []
-  if (e.status) parts.push(e.status)
-  if (e.exit_code !== undefined) parts.push(`exit ${e.exit_code}`)
-  if (e.reason && e.reason !== e.status) parts.push(e.reason)
-  if (e.count) parts.push(`${e.count} removed`)
-  if (e.values && Object.keys(e.values).length) parts.push(JSON.stringify(e.values))
-  return parts.join(' · ')
-}
-
-watch(() => route.query, load, { immediate: true })
+onMounted(loadPolicy)
 </script>
 
 <template>
   <div class="row">
     <h1>Admin</h1>
     <span class="spacer" />
-    <button class="btn" type="button" @click="load">Refresh</button>
+    <a class="btn" :href="api.exportPolicyURL" download title="Download the access policy (environments, roles, users, rules, exceptions) as YAML">Export policy</a>
+    <button class="btn" type="button" title="Replace the whole access policy with an exported file" @click="importFile?.click()">Import policy</button>
+    <input ref="importFile" type="file" accept=".yaml,.yml,application/yaml,text/yaml" hidden @change="chooseImport" />
+    <button class="btn" type="button" @click="refresh">Refresh</button>
   </div>
+
+  <p v-if="importError" class="alert" role="alert">Cannot import: {{ importError }}</p>
+  <div v-if="pending" class="card stack" role="dialog" aria-label="Import the access policy">
+    <strong>Replace the whole access policy with the file?</strong>
+    <p>
+      It has {{ pending.summary.environments }} environments, {{ pending.summary.roles }} roles, {{ pending.summary.users }} users with
+      roles, {{ pending.summary.rules }} rules and {{ pending.summary.exceptions }} exceptions.
+      <template v-if="pending.summary.removed_rules || pending.summary.removed_exceptions || pending.summary.removed_users">
+        <br /><span class="tone-warn">
+          It removes {{ pending.summary.removed_rules }} rules, {{ pending.summary.removed_exceptions }} exceptions and the roles of
+          {{ pending.summary.removed_users }} users that exist now.
+        </span>
+      </template>
+    </p>
+    <ul v-if="pending.warnings.length" class="small tone-warn">
+      <li v-for="(w, i) in pending.warnings" :key="i">{{ w }}</li>
+    </ul>
+    <div class="row">
+      <button class="btn btn-danger" type="button" :disabled="policyState.saving" @click="confirmImport">Replace</button>
+      <button class="btn btn-quiet" type="button" @click="pending = null">Cancel</button>
+    </div>
+  </div>
+
   <div class="tabs" role="tablist">
-    <button role="tab" type="button" :aria-selected="tab === 'users'" :class="{ active: tab === 'users' }" @click="showTab('users')">Users</button>
-    <button role="tab" type="button" :aria-selected="tab === 'activity'" :class="{ active: tab === 'activity' }" @click="showTab('activity')">
-      Activity
+    <button
+      v-for="t in tabs"
+      :key="t.id"
+      role="tab"
+      type="button"
+      :aria-selected="tab === t.id"
+      :class="{ active: tab === t.id }"
+      @click="show(t.id)"
+    >
+      {{ t.label }}
     </button>
   </div>
-  <p v-if="error" class="alert" role="alert">{{ error }}</p>
 
-  <template v-if="tab === 'users'">
-    <p class="muted">Everyone who signed in or used the server. "Active now" means a request in the last 5 minutes.</p>
-    <p v-if="loading && !users.length" class="muted">Loading…</p>
-    <div v-else class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">User</th>
-            <th scope="col">Status</th>
-            <th scope="col">Last activity</th>
-            <th scope="col">Last sign-in</th>
-            <th scope="col">Address</th>
-            <th scope="col">Runs</th>
-            <th scope="col">Sessions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="u in users" :key="u.name">
-            <td>
-              <strong>{{ u.name }}</strong>
-              <span v-if="u.admin" class="badge tone-info" style="margin-left: 0.35rem">admin</span>
-              <div v-if="u.groups?.length" class="muted small">{{ u.groups.join(', ') }}</div>
-            </td>
-            <td><span class="badge" :class="`tone-${userStatus[u.status].tone}`">{{ userStatus[u.status].text }}</span></td>
-            <td>{{ formatDateTime(u.last_seen) }}</td>
-            <td>{{ formatDateTime(u.last_login) || '—' }}</td>
-            <td>{{ u.last_ip || '—' }}</td>
-            <td>
-              <RouterLink :to="{ name: 'runs', query: { user: u.name } }">{{ u.runs }}</RouterLink>
-              <RouterLink v-if="u.running" :to="{ name: 'running' }" class="muted"> ({{ u.running }} running)</RouterLink>
-              · <a href="#" @click.prevent="userActivity(u.name)">activity</a>
-            </td>
-            <td>
-              <template v-if="u.sessions">
-                {{ u.sessions }}
-                <span class="muted small">({{ (u.methods ?? []).map((m) => methodLabels[m] ?? m).join(', ') }})</span>
-                <button class="btn btn-quiet small" type="button" @click="signOutEverywhere(u.name)">Sign out everywhere</button>
-              </template>
-              <span v-else class="muted">—</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+  <p v-if="!policyState.view && policyState.error && tab !== 'activity'" class="alert" role="alert">{{ policyState.error }}</p>
+  <UsersTab v-if="tab === 'users'" ref="users" @activity="(u) => show('activity', { user: u })" @access="(u) => show('access', { user: u })" />
+  <template v-else-if="tab === 'activity'">
+    <ActivityTab ref="activity" />
   </template>
-
-  <template v-else>
-    <form class="row filters" @submit.prevent="applyFilter">
-      <label>User <input v-model.trim="filter.user" type="text" /></label>
-      <label>
-        Action
-        <select v-model="filter.action">
-          <option value="">Any</option>
-          <option v-for="a in actions" :key="a" :value="a">{{ a }}</option>
-        </select>
-      </label>
-      <label>
-        Result
-        <select v-model="filter.outcome">
-          <option value="">Any</option>
-          <option value="success">success</option>
-          <option value="failure">failure</option>
-        </select>
-      </label>
-      <label>Script <input v-model.trim="filter.script" type="text" /></label>
-      <button class="btn" type="submit">Filter</button>
-    </form>
-    <p v-if="loading && !events.length" class="muted">Loading…</p>
-    <p v-else-if="!events.length" class="muted">No matching activity.</p>
-    <div v-else class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Time</th>
-            <th scope="col">User</th>
-            <th scope="col">Action</th>
-            <th scope="col">Result</th>
-            <th scope="col">Script / run</th>
-            <th scope="col">Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(e, i) in events" :key="i">
-            <td>{{ formatDateTime(e.time) }}</td>
-            <td :title="e.source_ip">{{ e.user || '—' }}</td>
-            <td>{{ e.action }}</td>
-            <td><span class="badge" :class="e.outcome === 'success' ? 'tone-ok' : 'tone-bad'">{{ e.outcome }}</span></td>
-            <td>
-              {{ e.script }}
-              <RouterLink v-if="e.run_id" :to="{ name: 'run', params: { id: e.run_id } }" class="muted small">{{ e.run_id }}</RouterLink>
-            </td>
-            <td class="small">{{ details(e) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </template>
+  <p v-else-if="!policyState.view" class="muted">Loading…</p>
+  <RolesTab v-else-if="tab === 'roles'" @access="(r) => show('access', { role: r })" @rules="(r) => show('rules', { role: r })" />
+  <RulesTab v-else-if="tab === 'rules'" :role="q('role')" />
+  <ExceptionsTab v-else-if="tab === 'exceptions'" :user="q('user')" />
+  <EnvironmentsTab v-else-if="tab === 'environments'" />
+  <AccessTab v-else-if="tab === 'access'" :user="q('user')" :role="q('role')" @select="(w) => show('access', w as Record<string, string>)" />
 </template>

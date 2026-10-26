@@ -72,7 +72,7 @@ func (s *Server) runSocket(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if run != nil {
-		go s.socketCommands(ctx, cancel, c, run, r)
+		go s.socketCommands(ctx, cancel, c, run, r, s.canControl(r, run.User))
 		err = s.streamLive(ctx, c, r, run, offset)
 	} else {
 		ctx = c.CloseRead(ctx)
@@ -83,7 +83,7 @@ func (s *Server) runSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) socketCommands(ctx context.Context, cancel context.CancelFunc, c *websocket.Conn, run *executor.Run, r *http.Request) {
+func (s *Server) socketCommands(ctx context.Context, cancel context.CancelFunc, c *websocket.Conn, run *executor.Run, r *http.Request, control bool) {
 	defer cancel()
 	for {
 		var msg wsIn
@@ -91,16 +91,18 @@ func (s *Server) socketCommands(ctx context.Context, cancel context.CancelFunc, 
 			return
 		}
 		var err error
-		switch msg.Type {
-		case "input":
+		switch {
+		case !control:
+			err = errors.New("you may only view this run")
+		case msg.Type == "input":
 			err = run.WriteInput(msg.Line, msg.Secret)
 			s.recordRunAction(r, audit.RunInput, run, err)
-		case "close_input":
+		case msg.Type == "close_input":
 			err = run.CloseInput()
-		case "stop":
+		case msg.Type == "stop":
 			run.Stop()
 			s.recordRunAction(r, audit.RunStop, run, nil)
-		case "kill":
+		case msg.Type == "kill":
 			run.Kill()
 			s.recordRunAction(r, audit.RunKill, run, nil)
 		default:

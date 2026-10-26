@@ -157,13 +157,30 @@ curl -fs -c "$JAR" -X POST "$B/auth/login" -H 'Content-Type: application/json' \
   -d "{\"method\":\"local\",\"password\":\"$pw\"}" >/dev/null || fail "built-in admin sign-in failed"
 curl -fs -b "$JAR" "$B/api/me" | jq -e '.name == "admin@local" and .admin' >/dev/null || fail "not signed in as admin@local"
 echo "password only in the file (not in the log); admin@local signed in"
+
+step "Access policy"
+pol=$(curl -fs -b "$JAR" "$B/api/admin/policy")
+echo "$pol" | jq -e '[.policy.environments[].name] == ["development","acceptance","production"]' >/dev/null || fail "environments not seeded from the values"
+rev=$(echo "$pol" | jq .policy.revision)
+curl -fs -b "$JAR" -X POST "$B/api/admin/policy/rules" -H 'Content-Type: application/json' \
+  -d "{\"revision\":$rev,\"role\":\"developer\",\"scripts\":[\"tag:developer\"],\"environments\":[\"development\"],\"access\":\"run\"}" >/dev/null \
+  || fail "rule not created"
+curl -fs -b "$JAR" "$B/api/admin/policy/effective?role=developer" \
+  | jq -e '.scripts[] | select(.name == "🗂️ Rotate Logs") | .access.development.access == "run" and (.access.production == null)' >/dev/null \
+  || fail "developer access not as the rule says"
+curl -fs -b "$JAR" "$B/api/admin/activity?action=policy-change" | jq -e '.events | length == 1' >/dev/null || fail "policy change not audited"
+curl -fs -b "$JAR" "$B/api/admin/policy/export" | grep -q 'tag:developer' || fail "export misses the rule"
+echo "environments seeded, rule created, developer access computed, change audited, export works"
+
 upgrade --set-json 'auth.methods=["ldap"]' --set auth.ldap.url=ldaps://ldap.invalid,auth.ldap.userBaseDN=dc=example,auth.cookieSecure=false
 code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$B/api/me")
 [ "$code" = "401" ] || fail "built-in admin session still valid after disabling ($code)"
 kubectl -n "$NS" exec deploy/runwarden -- test ! -e /var/lib/runwarden/initial-admin-password || fail "password file not removed"
 rm -f "$JAR"
+kubectl -n "$NS" exec deploy/runwarden -- cat /var/lib/runwarden/policy.json | jq -e '.rules | length == 1' >/dev/null \
+  || fail "policy not kept on the data volume"
 upgrade
-echo "disabled: password file removed, admin session refused"
+echo "disabled: password file removed, admin session refused; policy kept across restarts"
 
 echo
 echo "PASS: Runwarden runs in kind"

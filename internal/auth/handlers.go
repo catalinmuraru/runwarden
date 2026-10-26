@@ -47,6 +47,7 @@ type Options struct {
 	AllowedOrigins []string  // extra hosts trusted for state-changing requests
 	ClientIP       clientip.Resolver
 	IsAdmin        func(User) bool
+	Roles          func(User) []string // the user's roles, shown in the UI
 	// Failed sign-ins allowed per client address (15 minutes) and in total (1 minute), on top of
 	// the per user+address limit. Zero means no limit.
 	MaxFailuresPerIP  int
@@ -64,6 +65,9 @@ type Handler struct {
 
 // New returns a Handler.
 func New(opts Options) *Handler {
+	if opts.Roles == nil {
+		opts.Roles = func(User) []string { return nil }
+	}
 	if opts.IsAdmin == nil {
 		opts.IsAdmin = func(User) bool { return false }
 	}
@@ -366,6 +370,7 @@ type meResponse struct {
 	Name     string   `json:"name"`
 	Groups   []string `json:"groups"`
 	Admin    bool     `json:"admin"`
+	Roles    []string `json:"roles"`     // empty: guest
 	AuthType string   `json:"auth_type"` // sign-in method, or "none"
 }
 
@@ -378,7 +383,11 @@ func (h *Handler) meBody(u User) meResponse {
 	if h.opts.NoAuth {
 		method = "none"
 	}
-	return meResponse{Name: u.Name, Groups: groups, Admin: h.opts.IsAdmin(u), AuthType: method}
+	roles := h.opts.Roles(u)
+	if roles == nil {
+		roles = []string{}
+	}
+	return meResponse{Name: u.Name, Groups: groups, Admin: h.opts.IsAdmin(u), Roles: roles, AuthType: method}
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {

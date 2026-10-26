@@ -23,7 +23,7 @@ func TestRunEndEvent(t *testing.T) {
 	code := 3
 	Log(t.Context(), Event{
 		Action: RunEnd, Category: "process", Type: "end", Success: false, Reason: "failed",
-		User: "alice", Groups: []string{"ops"}, SourceIP: "203.0.113.7", UserAgent: "curl/8",
+		User: "alice", Roles: []string{"developer"}, Groups: []string{"ops"}, Environments: []string{"production"}, SourceIP: "203.0.113.7", UserAgent: "curl/8",
 		RunID: "r1", Script: "Backup", Status: "failed", ExitCode: &code, Duration: 1500 * time.Millisecond,
 		Values: map[string]any{"Token": "******", "Name": "x"}, Args: []string{"--token", "******"},
 	})
@@ -49,7 +49,7 @@ func TestRunEndEvent(t *testing.T) {
 		t.Errorf("failures log at warn: %v", e["level"])
 	}
 	user := e["user"].(map[string]any)
-	if user["name"] != "alice" || user["roles"].([]any)[0] != "ops" {
+	if user["name"] != "alice" || user["roles"].([]any)[0] != "developer" {
 		t.Errorf("user = %v", user)
 	}
 	if e["source"].(map[string]any)["ip"] != "203.0.113.7" || e["user_agent"].(map[string]any)["original"] != "curl/8" {
@@ -63,6 +63,9 @@ func TestRunEndEvent(t *testing.T) {
 	run := rw["run"].(map[string]any)
 	if run["id"] != "r1" || run["status"] != "failed" || run["parameters"] != `{"Name":"x","Token":"******"}` {
 		t.Errorf("runwarden.run = %v", run)
+	}
+	if g := rw["auth"].(map[string]any)["groups"].([]any); g[0] != "ops" || rw["environments"].([]any)[0] != "production" {
+		t.Errorf("runwarden.auth / environments = %v", rw)
 	}
 	if rw["script"].(map[string]any)["name"] != "Backup" {
 		t.Errorf("runwarden.script = %v", rw["script"])

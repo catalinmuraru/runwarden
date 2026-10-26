@@ -26,6 +26,8 @@ const (
 	ConfigReload   = "config-reload"
 	HistoryCleanup = "history-cleanup"
 	SessionRevoke  = "session-revoke"
+	PolicyChange   = "policy-change"
+	PolicyExpiry   = "exception-expired"
 )
 
 // Event is one audited action.
@@ -38,8 +40,9 @@ type Event struct {
 	Message  string
 
 	User       string
-	Groups     []string
-	AuthMethod string // how the user signed in: gitlab, oidc, ldap or local
+	Roles      []string // Runwarden roles (ECS user.roles)
+	Groups     []string // groups from the identity provider: shown, never grant rights
+	AuthMethod string   // how the user signed in: gitlab, oidc, ldap or local
 	SourceIP   string
 	UserAgent  string
 
@@ -51,6 +54,10 @@ type Event struct {
 	ExitCode *int
 	Duration time.Duration
 	Count    int // e.g. runs removed by a cleanup
+
+	Environments []string // environments a run touches
+	PolicyObject string   // what a policy change is about, e.g. "rule 1a2b3c4d"
+	PolicyChange string   // short description of the change
 }
 
 // Log writes e as one ECS event.
@@ -77,8 +84,8 @@ func Log(ctx context.Context, e Event) {
 
 	if e.User != "" {
 		user := []any{slog.String("name", e.User)}
-		if len(e.Groups) > 0 {
-			user = append(user, slog.Any("roles", e.Groups))
+		if len(e.Roles) > 0 {
+			user = append(user, slog.Any("roles", e.Roles))
 		}
 		attrs = append(attrs, slog.Group("user", user...))
 	}
@@ -124,8 +131,21 @@ func Log(ctx context.Context, e Event) {
 	if e.Count > 0 {
 		custom = append(custom, slog.Int("count", e.Count))
 	}
+	var authAttrs []any
 	if e.AuthMethod != "" {
-		custom = append(custom, slog.Group("auth", slog.String("method", e.AuthMethod)))
+		authAttrs = append(authAttrs, slog.String("method", e.AuthMethod))
+	}
+	if len(e.Groups) > 0 {
+		authAttrs = append(authAttrs, slog.Any("groups", e.Groups))
+	}
+	if len(authAttrs) > 0 {
+		custom = append(custom, slog.Group("auth", authAttrs...))
+	}
+	if len(e.Environments) > 0 {
+		custom = append(custom, slog.Any("environments", e.Environments))
+	}
+	if e.PolicyObject != "" || e.PolicyChange != "" {
+		custom = append(custom, slog.Group("policy", slog.String("object", e.PolicyObject), slog.String("change", e.PolicyChange)))
 	}
 	if len(custom) > 0 {
 		attrs = append(attrs, slog.Group("runwarden", custom...))
@@ -140,9 +160,10 @@ func Log(ctx context.Context, e Event) {
 	if fn := sink.Load(); fn != nil {
 		(*fn)(Record{
 			Time: time.Now().UTC(), Action: e.Action, Outcome: outcome, Reason: e.Reason, Message: msg,
-			User: e.User, Groups: e.Groups, AuthMethod: e.AuthMethod, SourceIP: e.SourceIP, UserAgent: e.UserAgent,
+			User: e.User, Roles: e.Roles, Groups: e.Groups, AuthMethod: e.AuthMethod, SourceIP: e.SourceIP, UserAgent: e.UserAgent,
 			RunID: e.RunID, Script: e.Script, Status: e.Status, Values: e.Values, Args: e.Args,
 			ExitCode: e.ExitCode, DurationMS: e.Duration.Milliseconds(), Count: e.Count,
+			Environments: e.Environments, PolicyObject: e.PolicyObject, PolicyChange: e.PolicyChange,
 		})
 	}
 }
@@ -155,6 +176,7 @@ type Record struct {
 	Reason     string         `json:"reason,omitempty"`
 	Message    string         `json:"message,omitempty"`
 	User       string         `json:"user,omitempty"`
+	Roles      []string       `json:"roles,omitempty"`
 	Groups     []string       `json:"groups,omitempty"`
 	AuthMethod string         `json:"auth_method,omitempty"`
 	SourceIP   string         `json:"source_ip,omitempty"`
@@ -167,6 +189,10 @@ type Record struct {
 	ExitCode   *int           `json:"exit_code,omitempty"`
 	DurationMS int64          `json:"duration_ms,omitempty"`
 	Count      int            `json:"count,omitempty"`
+
+	Environments []string `json:"environments,omitempty"`
+	PolicyObject string   `json:"policy_object,omitempty"`
+	PolicyChange string   `json:"policy_change,omitempty"`
 }
 
 var sink atomic.Pointer[func(Record)]

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ import (
 // paths.
 func (s *Server) adminOnly(fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.opts.Activity == nil || !s.opts.Policy.IsAdmin(currentUser(r)) {
+		if s.opts.Activity == nil || !s.opts.Access.IsAdmin(currentUser(r)) {
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
@@ -41,9 +42,16 @@ type adminUser struct {
 	Runs     int      `json:"runs"`
 	Running  int      `json:"running"`
 	Admin    bool     `json:"admin"`
+	Roles    []string `json:"roles"`             // empty: guest
+	Fixed    bool     `json:"fixed,omitempty"`   // devops through the deployment (bootstrap list)
 	Sessions int      `json:"sessions"`          // valid sign-in sessions
 	Methods  []string `json:"methods,omitempty"` // how those sessions signed in
+	// Exceptions counts the user's active exceptions.
+	Exceptions int `json:"exceptions"`
 }
+
+// statusNever marks users who have roles but have not signed in yet.
+const statusNever = "never"
 
 // SessionAdmin lists and revokes sign-in sessions (implemented by auth.Store).
 type SessionAdmin interface {
@@ -71,10 +79,28 @@ func (s *Server) adminUsers(w http.ResponseWriter, _ *http.Request) {
 	}
 	users := s.opts.Activity.Users(now)
 	out := make([]adminUser, 0, len(users))
+	pol := s.opts.Access.Policy()
+	listed := map[string]bool{}
+	describe := func(u activity.User) adminUser {
+		key := strings.ToLower(u.Name)
+		listed[key] = true
+		au := adminUser{User: u, Runs: counts[key], Running: running[key]}
+		au.Roles = s.opts.Access.Roles(authUser(u))
+		if au.Roles == nil {
+			au.Roles = []string{}
+		}
+		au.Admin = s.opts.Access.IsAdmin(authUser(u))
+		au.Fixed = s.opts.Access.Store != nil && slices.ContainsFunc(s.opts.Access.Store.Bootstrap(), func(b string) bool { return strings.EqualFold(b, u.Name) })
+		for _, e := range pol.Exceptions {
+			if strings.EqualFold(e.User, u.Name) && e.Active(now) {
+				au.Exceptions++
+			}
+		}
+		return au
+	}
 	for _, u := range users {
 		key := strings.ToLower(u.Name)
-		au := adminUser{User: u, Runs: counts[key], Running: running[key]}
-		au.Admin = s.opts.Policy.IsAdmin(authUser(u))
+		au := describe(u)
 		if sessions != nil {
 			// Real sessions are known: they decide whether the user is signed in.
 			sum := sessions[key]
@@ -93,6 +119,21 @@ func (s *Server) adminUsers(w http.ResponseWriter, _ *http.Request) {
 			}
 		}
 		out = append(out, au)
+	}
+	// Users given roles (or listed in the deployment) before they first signed in.
+	var pending []string
+	for _, u := range pol.Users {
+		pending = append(pending, u.Name)
+	}
+	if s.opts.Access.Store != nil {
+		pending = append(pending, s.opts.Access.Store.Bootstrap()...)
+	}
+	for _, name := range pending {
+		if !listed[strings.ToLower(name)] {
+			au := describe(activity.User{Name: name})
+			au.Status = statusNever
+			out = append(out, au)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": out, "active_window_seconds": int(activity.ActiveWindow.Seconds())})
 }

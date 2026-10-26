@@ -4,6 +4,7 @@
   "working_directory": ".",
   "group": "Test",
   "description": "Prints its arguments and the content of an uploaded file.",
+  "environment_parameters": { "Env": "target" },
   "parameters": [
     { "name": "Name", "param": "--name", "required": true,
       "regex": { "pattern": "[a-z]+", "description": "lowercase letters" } },

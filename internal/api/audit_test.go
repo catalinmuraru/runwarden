@@ -108,7 +108,7 @@ func TestAuditTrail(t *testing.T) {
 	events := auditEvents(t, logs)
 
 	start := find(events, "run-start", "success", "Echo")
-	if start == nil || start.User.Name != "alice" || start.User.Roles[0] != "ops" || start.Source.IP != "127.0.0.1" ||
+	if start == nil || start.User.Name != "alice" || start.User.Roles[0] != "developer" || start.Source.IP != "127.0.0.1" ||
 		start.Runwarden.Run.ID != id || !strings.Contains(start.Runwarden.Run.Parameters, `"Token":"******"`) {
 		t.Errorf("run-start = %+v", start)
 	}

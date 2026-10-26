@@ -5,7 +5,7 @@
   "description": "No parameters. Produces a downloadable report and can be scheduled.",
   "group": "Reports",
   "requires_terminal": true,
-  "allowed_users": ["@ops", "report-bot"],
+  "tags": ["developer", "devops"],
   "output_files": ["examples/output/*.csv"],
   "scheduling": { "enabled": true }
 }

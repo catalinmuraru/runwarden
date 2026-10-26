@@ -3,7 +3,8 @@
 export interface Me {
   name: string
   groups: string[]
-  admin: boolean
+  admin: boolean // devops: every script, every run and the Admin area
+  roles: string[] // empty: guest
   auth_type: string
 }
 
@@ -17,11 +18,17 @@ export interface ScriptSummary {
   name: string
   group?: string
   description?: string
+  tags?: string[]
 }
+
+export type Access = 'view' | 'run'
 
 export interface Option {
   value: string
   label: string
+  // For values of environment parameters: the environment and the user's access there.
+  environment?: string
+  access?: Access
 }
 
 export interface Param {
@@ -43,12 +50,14 @@ export interface Param {
   file_recursive?: boolean
   file_type?: string
   file_extensions?: string[]
+  environment?: 'target' | 'source' // the parameter selects an environment
 }
 
 export interface ScriptDetail extends ScriptSummary {
   requires_terminal: boolean
   timeout_seconds: number // the run is stopped after this long
   parameters: Param[]
+  access: Record<string, Access> // per environment ("-": scripts without environments)
 }
 
 export interface RunMeta {
@@ -64,6 +73,8 @@ export interface RunMeta {
   output_truncated?: boolean
   files?: string[]
   terminal?: boolean // ran on a pseudo-terminal (input is echoed by the terminal)
+  environments?: string[] // "-" for runs of scripts without environments
+  can_control?: boolean // only on a single run: may send input, stop and kill
 }
 
 export interface RunFilter {
@@ -81,12 +92,86 @@ export interface AdminUser {
   last_login?: string
   signed_out?: string
   last_ip?: string
-  status: 'active' | 'signed-in' | 'signed-out'
+  status: 'active' | 'signed-in' | 'signed-out' | 'never'
   runs: number
   running: number
   admin: boolean
+  roles: string[] // empty: guest
+  fixed?: boolean // devops through the deployment settings
   sessions: number // valid sign-in sessions
   methods?: string[]
+  exceptions: number // active exceptions
+}
+
+export interface PolicyEnvironment {
+  name: string
+  match?: string[]
+}
+
+export interface Role {
+  name: string
+  description?: string
+}
+
+export interface Rule {
+  id: string
+  role: string
+  scripts: string[] // "*", script names or "tag:<tag>"
+  environments: string[] // "*", "-" or environment names
+  access: Access
+}
+
+export interface PolicyException {
+  id: string
+  user: string
+  scripts: string[]
+  environments: string[]
+  access: Access
+  reason: string
+  expires: string
+  created_by: string
+  created: string
+}
+
+export interface Policy {
+  revision: number
+  environments: PolicyEnvironment[]
+  unknown_environment?: string
+  roles: Role[]
+  users: { name: string; roles: string[] }[]
+  rules: Rule[]
+  exceptions: PolicyException[]
+}
+
+export interface PolicyView {
+  policy: Policy
+  warnings: string[]
+  bootstrap: string[]
+  max_exception_days: number
+  scripts: { name: string; group?: string; tags?: string[]; environment_parameters?: Record<string, string> }[]
+  tags: string[]
+}
+
+export interface Grant {
+  access: Access
+  by: string
+}
+
+export interface EffectiveAccess {
+  roles: string[]
+  environments: string[]
+  scripts: { name: string; group?: string; tags?: string[]; access: Record<string, Grant> }[]
+}
+
+export interface ImportSummary {
+  environments: number
+  roles: number
+  users: number
+  rules: number
+  exceptions: number
+  removed_rules: number
+  removed_exceptions: number
+  removed_users: number
 }
 
 export interface ActivityEvent {
@@ -96,6 +181,7 @@ export interface ActivityEvent {
   reason?: string
   message?: string
   user?: string
+  roles?: string[]
   groups?: string[]
   source_ip?: string
   run_id?: string
@@ -106,6 +192,9 @@ export interface ActivityEvent {
   exit_code?: number
   duration_ms?: number
   count?: number
+  environments?: string[]
+  policy_object?: string
+  policy_change?: string
 }
 
 export interface ActivityFilter {
@@ -139,10 +228,24 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
 }
 
+/** A request body sent as it is, with its content type. */
+export class RawBody {
+  readonly text: string
+  readonly contentType: string
+
+  constructor(text: string, contentType: string) {
+    this.text = text
+    this.contentType = contentType
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, credentials: 'same-origin', headers: {} }
   if (body instanceof FormData) {
     init.body = body
+  } else if (body instanceof RawBody) {
+    init.body = body.text
+    ;(init.headers as Record<string, string>)['Content-Type'] = body.contentType
   } else if (body !== undefined) {
     init.body = JSON.stringify(body)
     ;(init.headers as Record<string, string>)['Content-Type'] = 'application/json'
@@ -209,6 +312,32 @@ export const api = {
   adminUsers: async () => (await request<{ users: AdminUser[] }>('GET', '/api/admin/users')).users,
   activity: async (f: ActivityFilter = {}) =>
     (await request<{ events: ActivityEvent[] }>('GET', `/api/admin/activity${query({ ...f, limit: f.limit?.toString() })}`)).events,
+
+  policy: () => request<PolicyView>('GET', '/api/admin/policy'),
+  putEnvironments: (revision: number, environments: PolicyEnvironment[], unknown_environment: string) =>
+    request<PolicyView>('PUT', '/api/admin/policy/environments', { revision, environments, unknown_environment }),
+  createRole: (revision: number, role: Role) => request<PolicyView>('POST', '/api/admin/policy/roles', { revision, ...role }),
+  updateRole: (revision: number, name: string, role: Role) =>
+    request<PolicyView>('PUT', `/api/admin/policy/roles/${enc(name)}`, { revision, ...role }),
+  deleteRole: (revision: number, name: string) =>
+    request<PolicyView>('DELETE', `/api/admin/policy/roles/${enc(name)}${query({ revision: String(revision) })}`),
+  setUserRoles: (revision: number, name: string, roles: string[]) =>
+    request<PolicyView>('PUT', `/api/admin/policy/users/${enc(name)}`, { revision, roles }),
+  createRule: (revision: number, rule: Omit<Rule, 'id'>) => request<PolicyView>('POST', '/api/admin/policy/rules', { revision, ...rule }),
+  updateRule: (revision: number, rule: Rule) => request<PolicyView>('PUT', `/api/admin/policy/rules/${enc(rule.id)}`, { revision, ...rule }),
+  deleteRule: (revision: number, id: string) =>
+    request<PolicyView>('DELETE', `/api/admin/policy/rules/${enc(id)}${query({ revision: String(revision) })}`),
+  createException: (revision: number, e: Omit<PolicyException, 'id' | 'created' | 'created_by'>) =>
+    request<PolicyView>('POST', '/api/admin/policy/exceptions', { revision, ...e }),
+  endException: (revision: number, id: string) =>
+    request<PolicyView>('DELETE', `/api/admin/policy/exceptions/${enc(id)}${query({ revision: String(revision) })}`),
+  effective: (who: { user?: string; role?: string }) => request<EffectiveAccess>('GET', `/api/admin/policy/effective${query(who)}`),
+  exportPolicyURL: '/api/admin/policy/export',
+  previewImport: (yaml: string) =>
+    request<{ summary: ImportSummary; warnings: string[] }>('POST', '/api/admin/policy/import?dry_run=true', new RawBody(yaml, 'application/yaml')),
+  importPolicy: (revision: number, yaml: string) =>
+    request<PolicyView>('POST', `/api/admin/policy/import${query({ revision: String(revision) })}`, new RawBody(yaml, 'application/yaml')),
+
   socketURL: (id: string, offset: number) => {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${proto}//${location.host}/api/runs/${enc(id)}/ws?offset=${offset}`

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -39,6 +40,32 @@ type App struct {
 	ValuesCacheTTL    time.Duration // VALUES_CACHE_TTL, default 60s; 0 disables the cache
 	ActivityMaxDay    int64         // ACTIVITY_MAX_DAY_BYTES, default 50Mi; then failed sign-ins are not kept
 	Auth              Auth
+	Access            Access
+}
+
+// Access configures the access policy (roles, rules and exceptions are edited in the Admin area).
+type Access struct {
+	// BootstrapDevops are devops whatever the policy says (BOOTSTRAP_DEVOPS, and the deprecated
+	// ADMIN_USERS).
+	BootstrapDevops []string
+	// Environments seed a new policy (POLICY_ENVIRONMENTS, JSON); an existing policy keeps its own.
+	Environments       []EnvironmentSeed
+	UnknownEnvironment string // POLICY_UNKNOWN_ENVIRONMENT; empty: the last environment
+	MaxExceptionDays   int    // POLICY_MAX_EXCEPTION_DAYS, default 90; 0: no limit
+	Warnings           []string
+}
+
+// EnvironmentSeed is an environment from POLICY_ENVIRONMENTS.
+type EnvironmentSeed struct {
+	Name  string   `json:"name"`
+	Match []string `json:"match"`
+}
+
+// DefaultEnvironments seed a new policy when POLICY_ENVIRONMENTS is not set.
+var DefaultEnvironments = []EnvironmentSeed{
+	{Name: "development", Match: []string{"dev*", "test*"}},
+	{Name: "acceptance", Match: []string{"acc*", "uat*"}},
+	{Name: "production", Match: []string{"prod*", "prd*"}},
 }
 
 // Per-run HOME modes.
@@ -67,10 +94,8 @@ type Auth struct {
 	SessionTTL   time.Duration // SESSION_TTL, default 12h
 	CookieSecure bool          // COOKIE_SECURE, default true unless PUBLIC_URL is http
 	// Failed sign-ins allowed before more attempts are refused, besides the per user+address limit.
-	MaxFailuresPerIP  int      // LOGIN_MAX_FAILURES_PER_IP, default 20 per 15 minutes
-	MaxFailuresGlobal int      // LOGIN_MAX_FAILURES_GLOBAL, default 100 per minute
-	AdminUsers        []string // ADMIN_USERS
-	AdminGroups       []string // ADMIN_GROUPS
+	MaxFailuresPerIP  int // LOGIN_MAX_FAILURES_PER_IP, default 20 per 15 minutes
+	MaxFailuresGlobal int // LOGIN_MAX_FAILURES_GLOBAL, default 100 per minute
 	OIDC              OIDC
 	GitLab            OIDC
 	LDAP              LDAP
@@ -222,7 +247,37 @@ func LoadApp(getenv func(string) string) (App, error) {
 	app.Auth = loadAuth(getenv, str, dur, &errs)
 	app.Auth.MaxFailuresPerIP = count("LOGIN_MAX_FAILURES_PER_IP", 20)
 	app.Auth.MaxFailuresGlobal = count("LOGIN_MAX_FAILURES_GLOBAL", 100)
+	app.Access = loadAccess(getenv, str, &errs)
+	app.Access.MaxExceptionDays = count("POLICY_MAX_EXCEPTION_DAYS", 90)
 	return app, errors.Join(errs...)
+}
+
+func loadAccess(getenv func(string) string, str func(string, string) string, errs *[]error) Access {
+	a := Access{
+		BootstrapDevops:    list(getenv("BOOTSTRAP_DEVOPS")),
+		Environments:       DefaultEnvironments,
+		UnknownEnvironment: str("POLICY_UNKNOWN_ENVIRONMENT", ""),
+	}
+	if old := list(getenv("ADMIN_USERS")); len(old) > 0 {
+		a.Warnings = append(a.Warnings, "ADMIN_USERS is deprecated; use BOOTSTRAP_DEVOPS (its users get the devops role)")
+		for _, u := range old {
+			if !slices.ContainsFunc(a.BootstrapDevops, func(b string) bool { return strings.EqualFold(b, u) }) {
+				a.BootstrapDevops = append(a.BootstrapDevops, u)
+			}
+		}
+	}
+	if str("ADMIN_GROUPS", "") != "" {
+		a.Warnings = append(a.Warnings, "ADMIN_GROUPS is ignored: groups no longer grant rights; give users the devops role in the Admin area or list them in BOOTSTRAP_DEVOPS")
+	}
+	if raw := str("POLICY_ENVIRONMENTS", ""); raw != "" {
+		var envs []EnvironmentSeed
+		if err := json.Unmarshal([]byte(raw), &envs); err != nil {
+			*errs = append(*errs, fmt.Errorf(`POLICY_ENVIRONMENTS: must be JSON like [{"name":"development","match":["dev*"]}]: %w`, err))
+		} else {
+			a.Environments = envs
+		}
+	}
+	return a
 }
 
 func loadAuth(getenv func(string) string, str func(string, string) string, dur func(string, time.Duration) time.Duration, errs *[]error) Auth {
@@ -241,8 +296,6 @@ func loadAuth(getenv func(string) string, str func(string, string) string, dur f
 	a := Auth{
 		PublicURL:    strings.TrimRight(str("PUBLIC_URL", ""), "/"),
 		SessionTTL:   dur("SESSION_TTL", 12*time.Hour),
-		AdminUsers:   list(getenv("ADMIN_USERS")),
-		AdminGroups:  list(getenv("ADMIN_GROUPS")),
 		InitialAdmin: flag("INITIAL_ADMIN"),
 	}
 	require := func(name, method string) string {
