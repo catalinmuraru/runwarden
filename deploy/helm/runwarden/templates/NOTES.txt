@@ -17,16 +17,13 @@ Use this only for local testing.
 
 The built-in administrator "admin@local" is enabled. Its password (new at every start):
   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "runwarden.fullname" . }} -- cat /var/lib/runwarden/initial-admin-password
-Set auth.initialAdmin=false once devops users can sign in.
+Give the devops role to the first user in the Admin area, then set auth.initialAdmin=false.
 {{- end }}
-{{- if .Values.auth.adminUsers }}
+{{- if and (not .Values.auth.initialAdmin) (not (has "none" (.Values.auth.methods | default list))) }}
 
-WARNING: auth.adminUsers is deprecated; move these users to auth.bootstrapDevops.
-{{- end }}
-{{- if and (not .Values.auth.bootstrapDevops) (not .Values.auth.adminUsers) (not .Values.auth.initialAdmin) (not (has "none" (.Values.auth.methods | default list))) }}
-
-Nobody has the devops role from the deployment: unless the access policy already has devops
-users, set auth.bootstrapDevops (or auth.initialAdmin) to manage roles in the Admin area.
+Admins are made in the Admin area. On a new installation nobody has the devops role yet: set
+auth.initialAdmin=true, sign in as the built-in administrator, give the devops role to the first
+user, then set it back to false.
 {{- end }}
 {{- if not .Values.persistence.enabled }}
 

@@ -328,9 +328,13 @@ first admins and for emergencies:
 - at every start a new random password is written to `DATA_DIR/initial-admin-password` (mode
   0600). It is never logged; the log names only the file:
   `kubectl exec deploy/runwarden -- cat /var/lib/runwarden/initial-admin-password`;
-- set `INITIAL_ADMIN=false` (or remove it) when real admins can sign in: the file is deleted,
-  the method disappears and every session of the built-in administrator ends;
-- it may be the only method (`AUTH_METHODS` empty) to bootstrap a new installation.
+- it is the only way to make the first admin: in the Admin area it gives the devops role to the
+  first user (who may not have signed in yet), who then sets up roles and rules for everyone else;
+- set `INITIAL_ADMIN=false` (or remove it) once a devops user can sign in: the file is deleted,
+  the method disappears and every session of the built-in administrator ends. While it is off,
+  the last devops user cannot lose the role (so the Admin area cannot be locked), and the server
+  warns at start if nobody has it;
+- it may be the only method (`AUTH_METHODS` empty) to set up a new installation.
 
 The signed-in user is passed to scripts as `RUNWARDEN_USER`.
 
@@ -402,15 +406,15 @@ consultants run theirs everywhere, and one developer may run an upload on accept
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BOOTSTRAP_DEVOPS` | – | users who are devops whatever the policy says (comma-separated), e.g. the first administrators. `ADMIN_USERS` is read the same way, with a deprecation warning; `ADMIN_GROUPS` is ignored |
 | `POLICY_ENVIRONMENTS` | development `dev*,test*`, acceptance `acc*,uat*`, production `prod*,prd*` | environments of a **new** policy, as JSON: `[{"name":"development","match":["dev*"]}]`; afterwards they are managed in the Admin area |
 | `POLICY_UNKNOWN_ENVIRONMENT` | the last environment | environment of values that match nothing, for a new policy |
 | `POLICY_MAX_EXCEPTION_DAYS` | `90` | longest exception that can be granted (`0`: no limit) |
 
 **Upgrading from `allowed_users` / `admin_users`**: these runner fields and `ADMIN_GROUPS` no
-longer grant anything (the configs still load, with a warning). After the upgrade everyone is a
-guest except `BOOTSTRAP_DEVOPS` users and the built-in administrator: sign in as one of them,
-give users their roles and add rules (tag the scripts in their configs first).
+longer grant anything (the configs still load, with a warning), and `ADMIN_USERS` is ignored too.
+After the upgrade everyone is a guest: enable the built-in administrator, give the devops role to
+the first user, turn the built-in administrator off, and let that user give roles and add rules
+(tag the scripts in their configs first).
 
 ## API
 
@@ -538,9 +542,9 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
 - **Sign-in**: `auth.methods` (default `[gitlab]`; e.g. `[gitlab, ldap]`), `auth.gitlab.url`
   for your GitLab, `auth.gitlab.requiredGroup`, `auth.initialAdmin`. `[none]` must be confirmed with
   `auth.allowNoAuth: true`. (`auth.type` was replaced by `auth.methods`; the chart says so.)
-- **Access**: `auth.bootstrapDevops` (the first administrators; `auth.adminUsers` still works,
-  `auth.adminGroups` makes the chart fail with a hint), `policy.environments`,
-  `policy.unknownEnvironment` and `policy.maxExceptionDays`.
+- **Access**: `policy.environments`, `policy.unknownEnvironment` and `policy.maxExceptionDays`.
+  The first devops user is made by the built-in administrator (`auth.initialAdmin`);
+  `auth.adminUsers` and `auth.adminGroups` were removed (the chart fails with a hint).
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
   (e.g. an SSH key from a Secret).
 

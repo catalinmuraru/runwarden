@@ -30,10 +30,6 @@ auth:
   sessionTTL: 12h
   # true/false; unset means true unless publicUrl is http://.
   cookieSecure: null
-  # Users who are devops (every script, every run, the Admin area) whatever the access policy
-  # says, e.g. the first administrators. Everyone else is a guest until given a role in the Admin
-  # area. Groups from the identity provider never grant rights.
-  bootstrapDevops: []
   oidc:
     issuerUrl: ""
     clientId: ""

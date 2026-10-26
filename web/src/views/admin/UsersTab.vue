@@ -4,6 +4,7 @@ import { api, type AdminUser } from '../../api'
 import { formatDateTime } from '../../lib/format'
 import { assignableRoles } from '../../lib/policy'
 import { changePolicy, policyState } from '../../lib/policyState'
+import { session } from '../../session'
 import PolicyStatus from './PolicyStatus.vue'
 
 const emit = defineEmits<{ activity: [string]; access: [string] }>()
@@ -25,6 +26,8 @@ const newUser = ref('')
 const newRoles = ref<string[]>([])
 
 const roles = computed(() => (policyState.view ? assignableRoles(policyState.view.policy) : []))
+const devopsUsers = computed(() => policyState.view?.policy.users.filter((u) => u.roles.includes('devops')).map((u) => u.name) ?? [])
+const builtInAdmin = computed(() => session.me?.name === 'admin@local' && session.me.auth_type === 'local')
 
 async function load() {
   loading.value = true
@@ -40,7 +43,7 @@ async function load() {
 
 function edit(u: AdminUser) {
   editing.value = u.name
-  draft.value = u.roles.filter((r) => !(u.fixed && r === 'devops'))
+  draft.value = [...u.roles]
 }
 
 function toggle(list: string[], role: string, on: boolean): string[] {
@@ -84,6 +87,17 @@ defineExpose({ load })
     Everyone who signed in, and users given roles in advance. Users without a role are guests: they can sign in but see nothing. "Active
     now" means a request in the last 5 minutes. Groups from the identity provider are shown for reference only; they grant no rights.
   </p>
+  <div v-if="builtInAdmin" class="card stack" role="note" style="margin-bottom: 1rem">
+    <strong>You are signed in as the built-in administrator.</strong>
+    <span v-if="!devopsUsers.length">
+      Nobody has the devops role yet. Give it to the first administrator below (they may not have signed in yet), then let them set
+      up roles and rules.
+    </span>
+    <span v-else>
+      devops: {{ devopsUsers.join(', ') }}. Once one of them has signed in, turn the built-in administrator off (<code>INITIAL_ADMIN=false</code>,
+      Helm <code>auth.initialAdmin: false</code>).
+    </span>
+  </div>
   <PolicyStatus />
   <p v-if="error" class="alert" role="alert">{{ error }}</p>
   <p v-if="loading && !users.length" class="muted">Loading…</p>
@@ -112,8 +126,7 @@ defineExpose({ load })
                 <label v-for="r in roles" :key="r">
                   <input
                     type="checkbox"
-                    :checked="draft.includes(r) || (u.fixed && r === 'devops')"
-                    :disabled="u.fixed && r === 'devops'"
+                    :checked="draft.includes(r)"
                     @change="draft = toggle(draft, r, ($event.target as HTMLInputElement).checked)"
                   />
                   {{ r }}
@@ -127,7 +140,6 @@ defineExpose({ load })
             <template v-else>
               <span v-for="r in u.roles" :key="r" class="badge" :class="{ 'tone-info': r === 'devops' }" style="margin-right: 0.25rem">{{ r }}</span>
               <span v-if="!u.roles.length" class="badge">guest</span>
-              <span v-if="u.fixed" class="muted small" title="BOOTSTRAP_DEVOPS in the deployment"> (devops from the deployment)</span>
               <div class="small">
                 <button v-if="u.name !== 'admin@local'" class="btn btn-quiet small" type="button" @click="edit(u)">Change roles</button>
                 <a href="#" @click.prevent="emit('access', u.name)">access</a>

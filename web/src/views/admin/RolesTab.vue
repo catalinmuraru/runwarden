@@ -17,7 +17,6 @@ const rows = computed(() => {
   const p = v.policy
   const holders = (role: string) => {
     const names = new Set(p.users.filter((u) => u.roles.includes(role)).map((u) => u.name.toLowerCase()))
-    if (role === 'devops') v.bootstrap.forEach((b) => names.add(b.toLowerCase()))
     return names.size
   }
   return p.roles.map((r) => ({

@@ -113,7 +113,7 @@ func setup(t *testing.T, limits executor.Limits, opts Options) *testEnv {
 }
 
 // testAccess is the policy of the API tests:
-//   - root: devops (bootstrap list)
+//   - root: devops
 //   - alice: developer + ops, runs everything she needs, Echo also on production
 //   - bob: developer, runs on development, views Echo on production, no tag:ops scripts
 //   - carol: auditor, views the tag:ops scripts and their runs
@@ -123,7 +123,6 @@ func testAccess(t *testing.T, data string) *authz.Authorizer {
 	t.Helper()
 	store, err := policy.Open(data, policy.Options{
 		Environments:     []policy.Environment{{Name: "development", Match: []string{"dev*"}}, {Name: "production", Match: []string{"prod*"}}},
-		Bootstrap:        []string{"root"},
 		MaxExceptionDays: 30,
 	})
 	if err != nil {
@@ -132,6 +131,7 @@ func testAccess(t *testing.T, data string) *authz.Authorizer {
 	_, _, err = store.Update(1, func(p *policy.Policy) error {
 		p.Roles = append(p.Roles, policy.Role{Name: "ops"}, policy.Role{Name: "auditor"}, policy.Role{Name: "intern"})
 		p.Users = []policy.UserRoles{
+			{Name: "root", Roles: []string{policy.RoleDevops}},
 			{Name: "alice", Roles: []string{policy.RoleDeveloper, "ops"}},
 			{Name: "bob", Roles: []string{policy.RoleDeveloper}},
 			{Name: "carol", Roles: []string{"auditor"}},

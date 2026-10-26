@@ -194,14 +194,16 @@ func newAccess(cfg config.App) (*authz.Authorizer, error) {
 	store, err := policy.Open(cfg.DataDir, policy.Options{
 		Environments:       envs,
 		UnknownEnvironment: cfg.Access.UnknownEnvironment,
-		Bootstrap:          cfg.Access.BootstrapDevops,
 		MaxExceptionDays:   cfg.Access.MaxExceptionDays,
+		// Without the built-in administrator nobody could give the devops role back.
+		KeepDevops: !cfg.Auth.InitialAdmin && !cfg.Auth.NoAuth,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("access policy: %w", err)
 	}
-	if len(cfg.Access.BootstrapDevops) > 0 {
-		slog.Info("access policy: devops from the deployment settings", "users", cfg.Access.BootstrapDevops)
+	if devops := store.Snapshot().DevopsUsers(); len(devops) == 0 && !cfg.Auth.InitialAdmin && !cfg.Auth.NoAuth {
+		slog.Warn("access policy: nobody has the devops role, so nobody can open the Admin area; " +
+			"set INITIAL_ADMIN=true, sign in as the built-in administrator and give the devops role to the first user")
 	}
 	return &authz.Authorizer{Store: store, Everyone: cfg.Auth.NoAuth}, nil
 }

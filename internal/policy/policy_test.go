@@ -105,16 +105,16 @@ func TestAccess(t *testing.T) {
 
 func TestStoreSeedPersistAndConflict(t *testing.T) {
 	dir := t.TempDir()
-	s := open(t, dir, Options{Bootstrap: []string{"Boot"}})
+	s := open(t, dir, Options{})
 	p := s.Snapshot()
-	if p.Revision != 1 || len(p.Environments) != 3 || len(p.Roles) != len(BuiltInRoles) {
+	if p.Revision != 1 || len(p.Environments) != 3 || len(p.Roles) != len(BuiltInRoles) || len(p.Users) != 0 {
 		t.Fatalf("seeded policy = %+v", p)
 	}
 	if info, err := os.Stat(filepath.Join(dir, policyFile)); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("policy file: %v %v", info, err)
 	}
-	if sub := s.Subject("boot"); !sub.IsDevops() {
-		t.Errorf("bootstrap user is not devops: %+v", sub)
+	if sub := s.Subject("anyone"); len(sub.Roles) != 0 {
+		t.Errorf("new user is not a guest: %+v", sub)
 	}
 
 	_, after, err := s.Update(1, func(p *Policy) error {
@@ -259,4 +259,43 @@ func mustJSON(t *testing.T, p *Policy) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestKeepDevops(t *testing.T) {
+	setDevops := func(s *Store, users ...string) error {
+		_, _, err := s.Update(s.Snapshot().Revision, func(p *Policy) error {
+			p.Users = nil
+			for _, u := range users {
+				p.Users = append(p.Users, UserRoles{Name: u, Roles: []string{RoleDevops}})
+			}
+			return nil
+		})
+		return err
+	}
+	guarded := open(t, t.TempDir(), Options{KeepDevops: true})
+	if err := setDevops(guarded); err != nil {
+		t.Errorf("no devops before and after: %v", err)
+	}
+	if err := setDevops(guarded, "ann", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	if err := setDevops(guarded, "bob"); err != nil {
+		t.Errorf("removing one of two devops: %v", err)
+	}
+	var verr *ValidationError
+	if err := setDevops(guarded); !errors.As(err, &verr) || !strings.Contains(err.Error(), "built-in administrator") {
+		t.Errorf("removing the last devops: %v", err)
+	}
+	if got := guarded.Snapshot().DevopsUsers(); len(got) != 1 || got[0] != "bob" {
+		t.Errorf("devops after the refusal = %v", got)
+	}
+
+	// While the built-in administrator is enabled it can always step in.
+	unguarded := open(t, t.TempDir(), Options{})
+	if err := setDevops(unguarded, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	if err := setDevops(unguarded); err != nil {
+		t.Errorf("unguarded store refused: %v", err)
+	}
 }

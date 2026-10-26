@@ -25,8 +25,9 @@ type Options struct {
 	// Environments and UnknownEnvironment seed a new policy; an existing policy keeps its own.
 	Environments       []Environment
 	UnknownEnvironment string
-	// Bootstrap users have the devops role, whatever the policy says (set in the deployment).
-	Bootstrap []string
+	// KeepDevops refuses changes that remove the last devops user, so the Admin area cannot be
+	// locked. Set it while the built-in administrator is disabled.
+	KeepDevops bool
 	// MaxExceptionDays bounds how long an exception may last (0: no limit).
 	MaxExceptionDays int
 }
@@ -92,19 +93,23 @@ func (s *Store) Snapshot() *Policy {
 	return s.p
 }
 
-// Bootstrap returns the users that are devops through the deployment settings.
-func (s *Store) Bootstrap() []string { return s.opts.Bootstrap }
-
 // MaxExceptionDays returns the longest allowed exception.
 func (s *Store) MaxExceptionDays() int { return s.opts.MaxExceptionDays }
 
-// Subject returns the user with the roles from the policy and the bootstrap list.
+// Subject returns the user with the roles assigned in the policy.
 func (s *Store) Subject(user string) Subject {
-	roles := slices.Clone(s.Snapshot().RolesOf(user))
-	if containsFold(s.opts.Bootstrap, user) && !containsFold(roles, RoleDevops) {
-		roles = append(roles, RoleDevops)
+	return Subject{User: user, Roles: slices.Clone(s.Snapshot().RolesOf(user))}
+}
+
+// DevopsUsers returns the users with the devops role.
+func (p *Policy) DevopsUsers() []string {
+	var out []string
+	for _, u := range p.Users {
+		if containsFold(u.Roles, RoleDevops) {
+			out = append(out, u.Name)
+		}
 	}
-	return Subject{User: user, Roles: roles}
+	return out
 }
 
 // Update applies change to a copy of the policy based on revision, validates and saves it.
@@ -120,6 +125,10 @@ func (s *Store) Update(revision int, change func(p *Policy) error) (before, afte
 		return nil, nil, err
 	}
 	next.normalize()
+	if s.opts.KeepDevops && len(s.p.DevopsUsers()) > 0 && len(next.DevopsUsers()) == 0 {
+		return nil, nil, &ValidationError{Problems: []string{
+			"at least one user must keep the devops role (or enable the built-in administrator first)"}}
+	}
 	// The length limit applies to new and changed exceptions only: it may have been lowered
 	// after older ones were granted.
 	if err := next.Validate(0); err != nil {

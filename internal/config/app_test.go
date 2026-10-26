@@ -311,7 +311,7 @@ func TestAccessSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := app.Access
-	if len(a.Environments) != 3 || a.Environments[2].Name != "production" || a.MaxExceptionDays != 90 || len(a.BootstrapDevops) != 0 || len(a.Warnings) != 0 {
+	if len(a.Environments) != 3 || a.Environments[2].Name != "production" || a.MaxExceptionDays != 90 || len(a.Warnings) != 0 {
 		t.Errorf("defaults = %+v", a)
 	}
 
@@ -325,7 +325,7 @@ func TestAccessSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	a = app.Access
-	if !slices.Equal(a.BootstrapDevops, []string{"ann", "bob", "carl"}) || len(a.Warnings) != 2 || a.MaxExceptionDays != 7 ||
+	if len(a.Warnings) != 3 || !strings.Contains(a.Warnings[0], "built-in administrator") || a.MaxExceptionDays != 7 ||
 		len(a.Environments) != 2 || a.Environments[0].Match[0] != "d-*" || a.UnknownEnvironment != "dev" {
 		t.Errorf("access = %+v", a)
 	}

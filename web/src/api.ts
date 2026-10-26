@@ -97,7 +97,6 @@ export interface AdminUser {
   running: number
   admin: boolean
   roles: string[] // empty: guest
-  fixed?: boolean // devops through the deployment settings
   sessions: number // valid sign-in sessions
   methods?: string[]
   exceptions: number // active exceptions
@@ -146,7 +145,6 @@ export interface Policy {
 export interface PolicyView {
   policy: Policy
   warnings: string[]
-  bootstrap: string[]
   max_exception_days: number
   scripts: { name: string; group?: string; tags?: string[]; environment_parameters?: Record<string, string> }[]
   tags: string[]

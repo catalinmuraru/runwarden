@@ -25,9 +25,9 @@
         "maxFailuresGlobal": { "type": "integer", "minimum": 0 },
         "publicUrl": { "type": "string" },
         "cookieSecure": { "type": ["boolean", "null"] },
-        "bootstrapDevops": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "adminUsers": { "type": "array", "items": { "type": "string" }, "description": "deprecated: use bootstrapDevops" },
-        "adminGroups": { "type": "array", "items": { "type": "string" }, "description": "removed: groups no longer grant rights" }
+        "bootstrapDevops": { "description": "removed: the built-in administrator gives the devops role" },
+        "adminUsers": { "description": "removed: the built-in administrator gives the devops role" },
+        "adminGroups": { "description": "removed: groups no longer grant rights" }
       }
     },
     "policy": {
