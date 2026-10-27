@@ -16,6 +16,13 @@ spec:
       {{- with .Values.networkPolicy.ingressFrom }}
       from:
         {{- toYaml . | nindent 8 }}
+        {{- if $.Values.executors }}
+        # The executors dial in.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $.Chart.Name }}-executor
+              app.kubernetes.io/instance: {{ $.Release.Name }}
+        {{- end }}
       {{- end }}
     - ports:
         - port: health

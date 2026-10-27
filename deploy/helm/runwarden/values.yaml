@@ -135,6 +135,57 @@ kube:
   #   development: runwarden-kube-development
   #   production: runwarden-kube-production
 
+# Executors: the environments listed here run their scripts and dropdown helpers in their own
+# pods (`runwarden executor`), which connect out to the server; the server keeps history, audit
+# and access control. The environment's `secrets` and `kube` entries above are mounted in its
+# executor pods instead of the server, so no other environment's runs (and not the server) can
+# reach them. Runs are refused while no executor of their environment is connected, and a run
+# whose executor pod stops fails. Environments not listed run on the server.
+executors: {}
+#  production:
+#    replicas: 2
+#    # Token the executor signs in with. Default: generated and kept in the Secret
+#    # <release>-executor-<environment> (a new one if that Secret is deleted). With GitOps tools
+#    # that render without cluster access, create a Secret with key "token" yourself and give
+#    # its hex SHA-256 (printf %s "$TOKEN" | sha256sum).
+#    token:
+#      existingSecret: ""
+#      sha256: ""
+#    # Default http://<release service>.<namespace>.svc; e.g. https://runwarden.example.com for
+#    # executors in another cluster.
+#    serverUrl: ""
+#    # Runs at the same time per replica (default limits.maxConcurrentRuns).
+#    maxConcurrentRuns: 10
+#    # Workspace of this environment's runs, one private directory per user, mounted in every
+#    # replica: with more than one replica it needs a ReadWriteMany volume (Azure Files, NFS).
+#    workspace:
+#      enabled: false
+#      size: 10Gi
+#      storageClass: ""
+#      accessModes: [ReadWriteMany]
+#      existingClaim: ""
+#      keepOnUninstall: true
+#    # Secret whose RUNNER_ENV_<NAME> keys reach this environment's scripts as <NAME> (the
+#    # server's existingSecret is not mounted here).
+#    existingSecret: ""
+#    extraEnv: []
+#    # With networkPolicy.enabled: the executor may reach the server and DNS, plus these rules
+#    # (the hosts its scripts work with).
+#    egress: []
+#    serviceAccount:
+#      create: true
+#      name: ""
+#      annotations: {}
+#      automountToken: false
+#    resources: {}   # default: resources
+#    podAnnotations: {}
+#    podLabels: {}
+#    nodeSelector: {}
+#    tolerations: []
+#    affinity: {}
+#    extraVolumes: []
+#    extraVolumeMounts: []
+
 # Access policy: roles, rules and exceptions are edited in the Admin area and kept on the data
 # volume (policy.json). The environments here only seed a new policy; afterwards they are
 # managed in the Admin area too.

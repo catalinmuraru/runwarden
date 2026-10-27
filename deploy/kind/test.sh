@@ -311,6 +311,69 @@ curl -fs "$B/api/runs/$victim" | jq -e '.status == "finished" and .exit_code == 
 upgrade
 echo "the attacker could not read the victim's HOME, environ or memory, read DATA_DIR, secrets, kubeconfigs, runner configs or another user's workspace (signals: $signal)"
 
+step "Executors (remote environment)"
+# production runs on its own executor pods (2 replicas); the server keeps development and
+# acceptance and no longer mounts production's secrets and kubeconfig.
+upgrade --set limits.maxRunsPerUser=0 --set executors.production.replicas=2
+XD=deploy/runwarden-executor-production
+kubectl -n "$NS" rollout status "$XD" --timeout 2m >/dev/null
+health() { kubectl -n "$NS" exec deploy/runwarden -- bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf "GET /readyz HTTP/1.0\r\n\r\n" >&3; cat <&3'; }
+for _ in $(seq 30); do health | grep -q 'executors production: up (2 connected)' && break; sleep 1; done
+health | grep -q 'executors production: up (2 connected)' || fail "readiness does not show 2 executors: $(health)"
+kubectl -n "$NS" exec deploy/runwarden -- sh -c 'test ! -e /runwarden/secrets/production && test ! -e /runwarden/kube/production' \
+  || fail "production secrets or kubeconfig still mounted on the server"
+kubectl -n "$NS" exec "$XD" -- test -e /runwarden/secrets/production/DB_PASSWORD || fail "production secret not mounted on the executor"
+kubectl -n "$NS" exec "$XD" -- sh -c 'test ! -e /runwarden/secrets/development && test ! -e /runwarden/kube/development' \
+  || fail "another environment's secrets reached the executor"
+prod=$(credentials production)
+echo "$prod" | grep -q "DB_PASSWORD: ${#PROD_DB} characters, fingerprint $(fp "$PROD_DB")" || fail "production secret wrong on the executor: $prod"
+echo "$prod" | grep -q 'printed as is: \*\*\*\*\*\*' || fail "executor did not mask the secret: $prod"
+if echo "$prod" | grep -qE "$PROD_DB|common-api-token"; then fail "secret value in the executor's output"; fi
+dev=$(credentials development)
+echo "$dev" | grep -q "DB_PASSWORD: ${#DEV_DB} characters" || fail "development (local) broke: $dev"
+curl -fs "$B/api/scripts/%F0%9F%97%82%EF%B8%8F%20Rotate%20Logs/parameters/Instances/values?Environment=production" \
+  | jq -e '[.values[].value] | index("web-3")' >/dev/null || fail "helper did not run on the executor"
+out=$(kube_out "$(kube_run '{"Environment":"production"}')")
+echo "$out" | grep -q "context=production var=production" && echo "$out" | grep -q "marker=production" \
+  || fail "production kube run on the executor: $out"
+code=$(curl -s -o /tmp/rw-pair.json -w '%{http_code}' -X POST "$B/api/scripts/Kube%20Whoami/runs" -H 'Content-Type: application/json' \
+  -d '{"values":{"Environment":"development","Source":"production"}}')
+[ "$code" = "409" ] || fail "run using a remote environment as a second one answered $code: $(cat /tmp/rw-pair.json)"
+admin=$(curl -fs "$B/api/admin/secrets")
+echo "$admin" | jq -e '(.executors[] | select(.environment == "production") | (.pods | length) == 2 and ([.secrets[].name] | index("DB_PASSWORD") != null))' >/dev/null \
+  || fail "admin overview does not show the executors: $(echo "$admin" | jq -c .executors)"
+if echo "$admin" | grep -qF "$PROD_DB"; then fail "a secret value reached the admin overview"; fi
+# Stop goes through the executor.
+long=$(kube_run '{"Environment":"production","Wait":"120"}')
+sleep 2
+curl -fs -X POST "$B/api/runs/$long/stop" >/dev/null || fail "stop refused"
+kube_out "$long" >/dev/null
+curl -fs "$B/api/runs/$long" | jq -e '.status != "running" and .status != "finished"' >/dev/null || fail "stopped run: $(curl -fs "$B/api/runs/$long")"
+# A replica that dies mid-run: the run fails, the other replica keeps serving.
+long=$(kube_run '{"Environment":"production","Wait":"120"}')
+pod=
+for _ in $(seq 20); do
+  pod=$(curl -fs "$B/api/admin/secrets" | jq -r '.executors[] | select(.environment == "production") | .pods[] | select(.busy > 0) | .pod' | head -1)
+  [ -n "$pod" ] && break; sleep 0.5
+done
+[ -n "$pod" ] || fail "no busy executor pod"
+kubectl -n "$NS" exec "$pod" -- sh -c 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = runwarden ] && kill -9 "${p#/proc/}"; done; true' >/dev/null 2>&1 || true
+status=
+for _ in $(seq 40); do status=$(curl -fs "$B/api/runs/$long" | jq -r .status); [ "$status" != running ] && break; sleep 0.5; done
+[ "$status" = failed ] || fail "run on a killed executor is $status"
+curl -fs "$B/api/runs/$long/output" | grep -q 'executor connection lost' || fail "no notice that the executor was lost"
+credentials production | grep -q "DB_PASSWORD: ${#PROD_DB} characters" || fail "the remaining replica does not run production"
+# No executor connected: a clear refusal.
+kubectl -n "$NS" scale "$XD" --replicas=0 >/dev/null
+kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/name=runwarden-executor --timeout 2m >/dev/null
+for _ in $(seq 30); do health | grep -q 'executors production: down' && break; sleep 1; done
+code=$(curl -s -o /tmp/rw-down.json -w '%{http_code}' -X POST "$B/api/scripts/Check%20Credentials/runs" \
+  -H 'Content-Type: application/json' -d '{"values":{"Environment":"production"}}')
+[ "$code" = "503" ] && grep -q 'no executor is connected for environment production' /tmp/rw-down.json || fail "no executor answered $code: $(cat /tmp/rw-down.json)"
+upgrade
+if kubectl -n "$NS" get deploy runwarden-executor-production >/dev/null 2>&1; then fail "executor left after removing it from the values"; fi
+echo "production ran on 2 executor replicas (secret masked there, helper, kubeconfig, stop); its mounts left the server; a killed replica failed its run; none connected: 503"
+
 step "NetworkPolicy"
 api_ip=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')
 probe() { kubectl -n "$NS" exec deploy/runwarden -- timeout 3 bash -c "echo > /dev/tcp/$api_ip/443" >/dev/null 2>&1; }

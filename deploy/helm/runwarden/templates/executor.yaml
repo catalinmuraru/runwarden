@@ -1,0 +1,286 @@
+{{- range $env, $x := .Values.executors }}
+{{- $x = $x | default dict }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$" $env) }}
+{{- fail (printf "executors: invalid environment name %q" $env) }}
+{{- end }}
+{{- $ctx := dict "root" $ "env" $env }}
+{{- $name := include "runwarden.executorName" $ctx }}
+{{- $token := $x.token | default dict }}
+{{- $ws := $x.workspace | default dict }}
+{{- $sa := $x.serviceAccount | default dict }}
+{{- $saName := $sa.name | default $name }}
+{{- if not $token.existingSecret }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+type: Opaque
+data:
+  token: {{ include "runwarden.executorToken" $ctx | b64enc | quote }}
+{{- end }}
+{{- if ne (toString $sa.create) "false" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+  labels:
+    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+  {{- with $sa.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: {{ $sa.automountToken | default false }}
+{{- end }}
+{{- if and $ws.enabled (not $ws.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-workspace
+  labels:
+    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+  {{- if ne (toString $ws.keepOnUninstall) "false" }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml ($ws.accessModes | default (list "ReadWriteMany")) | nindent 4 }}
+  {{- with $ws.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $ws.size | default "10Gi" }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ hasKey $x "replicas" | ternary $x.replicas 1 }}
+  # A replica that stops ends its runs, so a new one is connected before an old one goes.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "runwarden.executorSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "runwarden.executorSelectorLabels" $ctx | nindent 8 }}
+        {{- with $x.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $x.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $saName }}
+      automountServiceAccountToken: {{ $sa.automountToken | default false }}
+      terminationGracePeriodSeconds: {{ $.Values.terminationGracePeriodSeconds }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: executor
+          image: {{ include "runwarden.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          args: ["executor"]
+          ports:
+            - name: health
+              containerPort: 8081
+          env:
+            {{- $e := dict }}
+            {{- include "runwarden.runSettings" (dict "root" $ "env" $e) }}
+            {{- $_ := set $e "EXECUTOR_ENVIRONMENT" $env }}
+            {{- $_ := set $e "EXECUTOR_SERVER_URL" ($x.serverUrl | default (printf "http://%s.%s.svc:%v" (include "runwarden.fullname" $) $.Release.Namespace $.Values.service.port)) }}
+            {{- $_ := set $e "MAX_CONCURRENT_RUNS" (toString ($x.maxConcurrentRuns | default $.Values.limits.maxConcurrentRuns)) }}
+            {{- if $ws.enabled }}{{ $_ := set $e "WORKSPACE_DIR" "/var/lib/runwarden-work" }}{{ end }}
+            {{- include "runwarden.envList" $e | nindent 12 }}
+            - name: EXECUTOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $token.existingSecret | default $name }}
+                  key: token
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- with $x.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $x.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+          {{- with ($x.resources | default $.Values.resources) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/runwarden
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/runwarden
+            {{- if $ws.enabled }}
+            - name: workspace
+              mountPath: /var/lib/runwarden-work
+            {{- end }}
+            {{- if $.Values.runs.homeSkeletonConfigMap }}
+            - name: home-skeleton
+              mountPath: /runwarden/home-skeleton
+              readOnly: true
+            {{- end }}
+            {{- if $.Values.secrets.common }}
+            - name: secrets-common
+              mountPath: /runwarden/secrets/common
+              readOnly: true
+            {{- end }}
+            {{- if index $.Values.secrets.environments $env }}
+            - name: secrets
+              mountPath: /runwarden/secrets/{{ $env }}
+              readOnly: true
+            {{- end }}
+            {{- if index $.Values.kube.environments $env }}
+            - name: kube
+              mountPath: /runwarden/kube/{{ $env }}
+              readOnly: true
+            {{- end }}
+            {{- with $x.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        # Only temporary files of the runs (private HOME, TMPDIR, uploads): history stays on the server.
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}
+        {{- if $ws.enabled }}
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: {{ $ws.existingClaim | default (printf "%s-workspace" $name) }}
+        {{- end }}
+        {{- with $.Values.runs.homeSkeletonConfigMap }}
+        - name: home-skeleton
+          configMap:
+            name: {{ . }}
+        {{- end }}
+        {{- with $.Values.secrets.common }}
+        - name: secrets-common
+          secret:
+            secretName: {{ . }}
+            defaultMode: 288 # 0440: readable by the pod's group (fsGroup), not by others
+        {{- end }}
+        {{- with index $.Values.secrets.environments $env }}
+        - name: secrets
+          secret:
+            secretName: {{ . }}
+            defaultMode: 288
+        {{- end }}
+        {{- with index $.Values.kube.environments $env }}
+        - name: kube
+          secret:
+            secretName: {{ . }}
+            items:
+              - key: config
+                path: config
+            defaultMode: 288
+        {{- end }}
+        {{- with $x.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $x.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $x.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $x.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if $.Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "runwarden.executorSelectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  # Nothing connects to an executor (it dials out): only the kubelet's probes.
+  ingress:
+    - ports:
+        - port: health
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "runwarden.selectorLabels" $ | nindent 14 }}
+      ports:
+        - port: 8080
+    {{- if $.Values.networkPolicy.egress.dns }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- end }}
+    {{- with $x.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

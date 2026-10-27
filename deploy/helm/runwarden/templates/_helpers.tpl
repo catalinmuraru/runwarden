@@ -58,19 +58,13 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- $_ := set $e "MAX_CONCURRENT_RUNS" (toString $l.maxConcurrentRuns) -}}
 {{- $_ := set $e "RUN_TIMEOUT" (toString $l.runTimeout) -}}
 {{- $_ := set $e "RUN_TIMEOUT_MAX" (toString $l.runTimeoutMax) -}}
-{{- $_ := set $e "KILL_GRACE" (toString $l.killGrace) -}}
 {{- $_ := set $e "MAX_RUNS_PER_USER" (toString $l.maxRunsPerUser) -}}
-{{- $_ := set $e "RUN_HOME" (toString .Values.runs.home) -}}
-{{- if .Values.runs.homeSkeletonConfigMap }}{{ $_ := set $e "HOME_SKELETON" "/runwarden/home-skeleton" }}{{ end -}}
 {{- $_ := set $e "VALUES_MAX_PER_USER" (toString .Values.valueScripts.maxPerUser) -}}
 {{- $_ := set $e "VALUES_MAX_GLOBAL" (toString .Values.valueScripts.maxGlobal) -}}
 {{- $_ := set $e "VALUES_CACHE_TTL" (toString .Values.valueScripts.cacheTTL) -}}
 {{- $_ := set $e "ACTIVITY_MAX_DAY_BYTES" (toString .Values.activity.maxDayBytes) -}}
 {{- $_ := set $e "LOGIN_MAX_FAILURES_PER_IP" (toString $a.maxFailuresPerIP) -}}
 {{- $_ := set $e "LOGIN_MAX_FAILURES_GLOBAL" (toString $a.maxFailuresGlobal) -}}
-{{- $_ := set $e "HEALTH_ADDR" ":8081" -}}
-{{- $_ := set $e "MAX_OUTPUT_BYTES" (toString $l.maxOutputBytes) -}}
-{{- $_ := set $e "MAX_UPLOAD_BYTES" (toString $l.maxUploadBytes) -}}
 {{- $_ := set $e "SESSION_TTL" (toString $a.sessionTTL) -}}
 {{- with $a.publicUrl }}{{ $_ := set $e "PUBLIC_URL" . }}{{ end -}}
 {{- if not (kindIs "invalid" $a.cookieSecure) }}{{ $_ := set $e "COOKIE_SECURE" (toString $a.cookieSecure) }}{{ end -}}
@@ -79,10 +73,14 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- fail (printf "auth.%s was removed: set auth.initialAdmin=true, sign in as the built-in administrator and give the devops role to the first user in the Admin area" $old) -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $e "SECRETS_DIR" "/runwarden/secrets" -}}
-{{- $_ := set $e "KUBE_DIR" "/runwarden/kube" -}}
+{{- include "runwarden.runSettings" (dict "root" . "env" $e) -}}
 {{- if and .Values.kube.environments (ne (toString .Values.runs.home) "per-run") -}}
 {{- fail "kube.environments needs runs.home=per-run: the kubeconfig is written into the run's private HOME" -}}
+{{- end -}}
+{{- with .Values.executors -}}
+{{- $hashes := dict -}}
+{{- range $env, $x := . }}{{ $_ := set $hashes $env (include "runwarden.executorTokenSha256" (dict "root" $ "env" $env)) }}{{ end -}}
+{{- $_ := set $e "EXECUTORS" (toJson $hashes) -}}
 {{- end -}}
 {{- $p := .Values.policy -}}
 {{- with $p.environments }}{{ $_ := set $e "POLICY_ENVIRONMENTS" (toJson .) }}{{ end -}}
@@ -92,11 +90,6 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- with .Values.trustedProxies }}{{ $_ := set $e "TRUSTED_PROXIES" (join "," .) }}{{ end -}}
 {{- $_ := set $e "HISTORY_MAX_AGE" (toString .Values.history.maxAge) -}}
 {{- $_ := set $e "HISTORY_MAX_RUNS" (toString .Values.history.maxRuns) -}}
-{{- $iso := .Values.isolation -}}
-{{- $_ := set $e "ISOLATION" (toString $iso.mode) -}}
-{{- with $iso.readPaths }}{{ $_ := set $e "ISOLATION_READ_PATHS" (join "," .) }}{{ end -}}
-{{- with $iso.writePaths }}{{ $_ := set $e "ISOLATION_WRITE_PATHS" (join "," .) }}{{ end -}}
-{{- $_ := set $e "RUN_MAX_PROCS" (toString $iso.maxProcs) -}}
 {{- if .Values.workspace.enabled }}{{ $_ := set $e "WORKSPACE_DIR" "/var/lib/runwarden-work" }}{{ end -}}
 {{- if has "oidc" $methods -}}
 {{- $_ := set $e "OIDC_ISSUER_URL" (required "auth.oidc.issuerUrl is required" $a.oidc.issuerUrl) -}}
@@ -126,8 +119,90 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- with $a.ldap.userGroupsAttr }}{{ $_ := set $e "LDAP_USER_GROUPS_ATTR" . }}{{ end -}}
 {{- with $a.ldap.label }}{{ $_ := set $e "LDAP_LABEL" . }}{{ end -}}
 {{- end -}}
-{{- range $k, $v := $e }}
+{{- include "runwarden.envList" $e }}
+{{- end -}}
+
+{{- define "runwarden.envList" -}}
+{{- range $k, $v := . }}
 - name: {{ $k }}
   value: {{ $v | quote }}
 {{- end }}
+{{- end -}}
+
+
+{{/* Settings of how scripts run, shared by the server and the executors: (dict "root" . "env" $dict). */}}
+{{- define "runwarden.runSettings" -}}
+{{- $v := .root.Values -}}
+{{- $e := .env -}}
+{{- $l := $v.limits -}}
+{{- $_ := set $e "KILL_GRACE" (toString $l.killGrace) -}}
+{{- $_ := set $e "MAX_OUTPUT_BYTES" (toString $l.maxOutputBytes) -}}
+{{- $_ := set $e "MAX_UPLOAD_BYTES" (toString $l.maxUploadBytes) -}}
+{{- $_ := set $e "RUN_HOME" (toString $v.runs.home) -}}
+{{- if $v.runs.homeSkeletonConfigMap }}{{ $_ := set $e "HOME_SKELETON" "/runwarden/home-skeleton" }}{{ end -}}
+{{- $_ := set $e "HEALTH_ADDR" ":8081" -}}
+{{- $_ := set $e "SECRETS_DIR" "/runwarden/secrets" -}}
+{{- $_ := set $e "KUBE_DIR" "/runwarden/kube" -}}
+{{- $iso := $v.isolation -}}
+{{- $_ := set $e "ISOLATION" (toString $iso.mode) -}}
+{{- with $iso.readPaths }}{{ $_ := set $e "ISOLATION_READ_PATHS" (join "," .) }}{{ end -}}
+{{- with $iso.writePaths }}{{ $_ := set $e "ISOLATION_WRITE_PATHS" (join "," .) }}{{ end -}}
+{{- $_ := set $e "RUN_MAX_PROCS" (toString $iso.maxProcs) -}}
+{{- end -}}
+
+{{/* Kubernetes name part of an environment: lower case, "_" and "." become "-". */}}
+{{- define "runwarden.envSlug" -}}
+{{- . | lower | replace "_" "-" | replace "." "-" | trunc 30 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/* Executor resource name: (dict "root" . "env" "<environment>"). */}}
+{{- define "runwarden.executorName" -}}
+{{- printf "%s-executor-%s" (include "runwarden.fullname" .root | trunc 32 | trimSuffix "-") (include "runwarden.envSlug" .env) -}}
+{{- end -}}
+
+{{- define "runwarden.executorSelectorLabels" -}}
+app.kubernetes.io/name: {{ .root.Chart.Name }}-executor
+app.kubernetes.io/instance: {{ .root.Release.Name }}
+runwarden/environment: {{ include "runwarden.envSlug" .env }}
+{{- end -}}
+
+{{- define "runwarden.executorLabels" -}}
+{{ include "runwarden.executorSelectorLabels" . }}
+app.kubernetes.io/version: {{ .root.Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .root.Release.Service }}
+helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version | replace "+" "_" }}
+{{- end -}}
+
+{{/*
+Token of an environment's executor, generated once and kept across upgrades (read back from its
+Secret). Every template of one render sees the same value: it is kept in .Values.
+*/}}
+{{- define "runwarden.executorToken" -}}
+{{- $root := .root -}}
+{{- if not (hasKey $root.Values "__executorTokens") -}}
+{{- $_ := set $root.Values "__executorTokens" dict -}}
+{{- end -}}
+{{- $tokens := index $root.Values "__executorTokens" -}}
+{{- if not (hasKey $tokens .env) -}}
+{{- $token := randAlphaNum 48 -}}
+{{- with lookup "v1" "Secret" $root.Release.Namespace (include "runwarden.executorName" .) -}}
+{{- with index .data "token" }}{{ $token = b64dec . }}{{ end -}}
+{{- end -}}
+{{- $_ := set $tokens .env $token -}}
+{{- end -}}
+{{- index $tokens .env -}}
+{{- end -}}
+
+{{/* Hex SHA-256 of an environment's executor token, as the server's EXECUTORS wants it. */}}
+{{- define "runwarden.executorTokenSha256" -}}
+{{- $x := index .root.Values.executors .env | default dict -}}
+{{- $t := $x.token | default dict -}}
+{{- if $t.existingSecret -}}
+{{- if not (regexMatch "^[0-9a-fA-F]{64}$" ($t.sha256 | default "")) -}}
+{{- fail (printf "executors.%s.token.sha256 is required with token.existingSecret: the hex SHA-256 of the token (printf %%s \"$TOKEN\" | sha256sum)" .env) -}}
+{{- end -}}
+{{- $t.sha256 | lower -}}
+{{- else -}}
+{{- include "runwarden.executorToken" . | sha256sum -}}
+{{- end -}}
 {{- end -}}

@@ -51,6 +51,58 @@
         }
       }
     },
+    "executors": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$", "not": { "enum": ["common"] } },
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "replicas": { "type": "integer", "minimum": 0 },
+          "token": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "existingSecret": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^([0-9a-fA-F]{64})?$" }
+            }
+          },
+          "serverUrl": { "type": "string", "pattern": "^((https?|wss?)://.+)?$" },
+          "maxConcurrentRuns": { "type": "integer", "minimum": 1 },
+          "workspace": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "size": { "type": "string" },
+              "storageClass": { "type": "string" },
+              "accessModes": { "type": "array", "items": { "type": "string" } },
+              "existingClaim": { "type": "string" },
+              "keepOnUninstall": { "type": "boolean" }
+            }
+          },
+          "existingSecret": { "type": "string" },
+          "extraEnv": { "type": "array" },
+          "egress": { "type": "array" },
+          "serviceAccount": {
+            "type": "object",
+            "properties": {
+              "create": { "type": "boolean" },
+              "name": { "type": "string" },
+              "annotations": { "type": "object" },
+              "automountToken": { "type": "boolean" }
+            }
+          },
+          "resources": { "type": "object" },
+          "podAnnotations": { "type": "object" },
+          "podLabels": { "type": "object" },
+          "nodeSelector": { "type": "object" },
+          "tolerations": { "type": "array" },
+          "affinity": { "type": "object" },
+          "extraVolumes": { "type": "array" },
+          "extraVolumeMounts": { "type": "array" }
+        }
+      }
+    },
     "policy": {
       "type": "object",
       "properties": {
