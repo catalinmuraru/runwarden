@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,8 +47,20 @@ type App struct {
 	ValuesMaxGlobal   int           // VALUES_MAX_GLOBAL, default 10
 	ValuesCacheTTL    time.Duration // VALUES_CACHE_TTL, default 60s; 0 disables the cache
 	ActivityMaxDay    int64         // ACTIVITY_MAX_DAY_BYTES, default 50Mi; then failed sign-ins are not kept
-	Auth              Auth
-	Access            Access
+	// ExecutorTokens (EXECUTORS, JSON {"<environment>": "<hex SHA-256 of its executor token>"})
+	// lists the environments whose runs execute on their executors; all others run here.
+	ExecutorTokens map[string]string
+	Auth           Auth
+	Access         Access
+	Executor       Executor // only in executor mode
+}
+
+// Executor is what `runwarden executor` needs besides the run settings of App.
+type Executor struct {
+	ServerURL   string // EXECUTOR_SERVER_URL: the server's base URL (http, https, ws or wss)
+	Token       string // EXECUTOR_TOKEN: this environment's executor token
+	Environment string // EXECUTOR_ENVIRONMENT, or --environment
+	Pod         string // POD_NAME, default the host name
 }
 
 // Access configures the access policy (roles, rules and exceptions are edited in the Admin area).
@@ -147,6 +160,46 @@ type LDAP struct {
 // LoadApp reads the configuration through getenv (usually os.Getenv). All problems are
 // reported together.
 func LoadApp(getenv func(string) string) (App, error) {
+	return load(getenv, false)
+}
+
+// LoadExecutor reads the configuration of `runwarden executor`: the run settings of LoadApp
+// plus Executor; no sign-in or access policy, which stay on the server. environment, when not
+// empty, overrides EXECUTOR_ENVIRONMENT.
+func LoadExecutor(getenv func(string) string, environment string) (App, error) {
+	app, err := load(getenv, true)
+	errs := []error{err}
+	x := Executor{
+		ServerURL:   strings.TrimSpace(getenv("EXECUTOR_SERVER_URL")),
+		Token:       strings.TrimSpace(getenv("EXECUTOR_TOKEN")),
+		Environment: strings.TrimSpace(getenv("EXECUTOR_ENVIRONMENT")),
+		Pod:         strings.TrimSpace(getenv("POD_NAME")),
+	}
+	if environment != "" {
+		x.Environment = environment
+	}
+	if x.Pod == "" {
+		x.Pod, _ = os.Hostname()
+	}
+	if u, perr := url.Parse(x.ServerURL); perr != nil || u.Host == "" || !slices.Contains([]string{"http", "https", "ws", "wss"}, u.Scheme) {
+		errs = append(errs, fmt.Errorf("EXECUTOR_SERVER_URL: want http(s):// or ws(s):// with a host, got %q", x.ServerURL))
+	}
+	if x.Token == "" {
+		errs = append(errs, errors.New("EXECUTOR_TOKEN is required"))
+	}
+	if !executorEnv.MatchString(x.Environment) {
+		errs = append(errs, fmt.Errorf("EXECUTOR_ENVIRONMENT (or --environment): invalid environment name %q", x.Environment))
+	}
+	app.Executor = x
+	return app, errors.Join(errs...)
+}
+
+// executorEnv matches environment directory names (as the secrets and kube stores do).
+var executorEnv = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+
+var sha256Hex = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
+func load(getenv func(string) string, executorMode bool) (App, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return App{}, err
@@ -272,6 +325,22 @@ func LoadApp(getenv func(string) string) (App, error) {
 		app.HomeSkeleton = dir("HOME_SKELETON", raw)
 		if info, err := os.Stat(app.HomeSkeleton); err != nil || !info.IsDir() {
 			errs = append(errs, fmt.Errorf("HOME_SKELETON: %s is not a directory", app.HomeSkeleton))
+		}
+	}
+	if executorMode {
+		return app, errors.Join(errs...)
+	}
+	if raw := str("EXECUTORS", ""); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &app.ExecutorTokens); err != nil {
+			errs = append(errs, fmt.Errorf(`EXECUTORS: want JSON {"<environment>": "<sha256 of its token>"}: %w`, err))
+		}
+		for env, hash := range app.ExecutorTokens {
+			if !executorEnv.MatchString(env) {
+				errs = append(errs, fmt.Errorf("EXECUTORS: invalid environment name %q", env))
+			}
+			if !sha256Hex.MatchString(hash) {
+				errs = append(errs, fmt.Errorf("EXECUTORS: the token of %s must be its hex SHA-256 (64 hex digits), not the token", env))
+			}
 		}
 	}
 	app.Auth = loadAuth(getenv, str, dur, &errs)

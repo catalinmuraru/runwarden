@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { SecretsOverview } from '../api'
-import { gapCount, isolationSummary, kubeGapCount, secretCell, secretColumns } from './secrets'
+import type { Isolation, SecretsOverview } from '../api'
+import { executorSummary, gapCount, isolationSummary, kubeGapCount, secretCell, secretColumns } from './secrets'
 
 const overview: SecretsOverview = {
   configured: true,
@@ -21,6 +21,7 @@ const overview: SecretsOverview = {
     ],
   },
   isolation: { mode: 'auto', active: true, abi: 7, signal_scoping: true },
+  executors: [],
 }
 
 describe('secrets matrix', () => {
@@ -53,5 +54,23 @@ describe('isolation summary', () => {
     expect(isolationSummary({ mode: 'auto', active: false, abi: 0, signal_scoping: false, reason: 'landlock is not available' }).text).toBe(
       'Not sandboxed (ISOLATION=auto): landlock is not available',
     )
+  })
+})
+
+describe('executorSummary', () => {
+  const sandboxed: Isolation = { mode: 'required', active: true, abi: 7, signal_scoping: true }
+  const pod = (busy: number, isolation = sandboxed) => ({ pod: `p${busy}`, version: '1', connected: '2026-10-27T10:00:00Z', busy, capacity: 10, isolation })
+  it('is down without pods', () => {
+    expect(executorSummary({ environment: 'production', pods: [], secrets: [] }).tone).toBe('bad')
+  })
+  it('sums the load of the pods', () => {
+    expect(executorSummary({ environment: 'production', pods: [pod(1), pod(2)], secrets: [] })).toEqual({ tone: 'ok', text: '2 connected, 3/20 busy' })
+  })
+  it('warns about pods without a sandbox', () => {
+    const off: Isolation = { mode: 'auto', active: false, abi: 0, signal_scoping: false }
+    expect(executorSummary({ environment: 'production', pods: [pod(0, off)], secrets: [] })).toEqual({
+      tone: 'warn',
+      text: '1 connected, 0/10 busy; 1 not sandboxed',
+    })
   })
 })

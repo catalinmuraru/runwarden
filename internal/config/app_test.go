@@ -368,3 +368,48 @@ func TestAccessSettings(t *testing.T) {
 		t.Errorf("non-JSON environments: %v", err)
 	}
 }
+
+func TestLoadExecutor(t *testing.T) {
+	app, err := LoadExecutor(env(map[string]string{
+		"EXECUTOR_SERVER_URL": "http://runwarden:8080", "EXECUTOR_TOKEN": "t0ken", //nolint:gosec // test value
+		"EXECUTOR_ENVIRONMENT": "dev", "POD_NAME": "exec-prod-0", "MAX_CONCURRENT_RUNS": "3",
+	}), "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := app.Executor
+	if x.ServerURL != "http://runwarden:8080" || x.Token != "t0ken" || x.Environment != "prod" || x.Pod != "exec-prod-0" || app.MaxConcurrentRuns != 3 {
+		t.Errorf("executor config %+v, runs %d", x, app.MaxConcurrentRuns)
+	}
+	if len(app.Auth.Methods) != 0 {
+		t.Errorf("executor mode read sign-in settings: %v", app.Auth.Methods)
+	}
+	_, err = LoadExecutor(env(map[string]string{"EXECUTOR_SERVER_URL": "ftp://x", "EXECUTOR_ENVIRONMENT": "../etc"}), "")
+	for _, want := range []string{"EXECUTOR_SERVER_URL", "EXECUTOR_TOKEN", "EXECUTOR_ENVIRONMENT"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing error for %s: %v", want, err)
+		}
+	}
+}
+
+func TestExecutorsSetting(t *testing.T) {
+	base := map[string]string{"AUTH_METHODS": "none", "ALLOW_NO_AUTH": "true"}
+	hash := strings.Repeat("ab", 32)
+	set := maps.Clone(base)
+	set["EXECUTORS"] = `{"production": "` + hash + `"}`
+	app, err := LoadApp(env(set))
+	if err != nil || app.ExecutorTokens["production"] != hash || len(app.ExecutorTokens) != 1 {
+		t.Fatalf("EXECUTORS: %v, %v", app.ExecutorTokens, err)
+	}
+	for raw, want := range map[string]string{ //nolint:gosec // no credentials: invalid token hashes
+		`["production"]`:                     "want JSON",
+		`{"../prod": "` + hash + `"}`:        "invalid environment name",
+		`{"production": "the-token"}`:        "hex SHA-256",
+		`{"production": "` + hash[2:] + `"}`: "hex SHA-256",
+	} {
+		set["EXECUTORS"] = raw
+		if _, err := LoadApp(env(set)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", raw, err, want)
+		}
+	}
+}

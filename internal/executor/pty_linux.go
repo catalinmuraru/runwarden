@@ -14,15 +14,15 @@ import (
 // ptySupported reports whether scripts with requires_terminal get a pseudo-terminal.
 const ptySupported = true
 
-// Terminal size given to scripts (tools like ls and progress bars format for it).
+// Default terminal size given to scripts (tools like ls and progress bars format for it).
 const (
 	ptyRows = 40
 	ptyCols = 120
 )
 
-// openPTY opens a new pseudo-terminal pair: master (Runwarden's side, read for output and
-// written for input) and tty (the script's terminal).
-func openPTY() (master, tty *os.File, err error) {
+// openPTY opens a new pseudo-terminal pair of the given size (zero: the default): master
+// (Runwarden's side, read for output and written for input) and tty (the script's terminal).
+func openPTY(rows, cols int) (master, tty *os.File, err error) {
 	master, err = os.OpenFile("/dev/ptmx", os.O_RDWR|syscall.O_NOCTTY|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open pty: %w", err)
@@ -43,12 +43,21 @@ func openPTY() (master, tty *os.File, err error) {
 	if err != nil {
 		return fail(err)
 	}
-	size := struct{ rows, cols, x, y uint16 }{ptyRows, ptyCols, 0, 0}
-	if err := ioctl(tty, syscall.TIOCSWINSZ, &size); err != nil {
+	if rows <= 0 || cols <= 0 {
+		rows, cols = ptyRows, ptyCols
+	}
+	if err := setSize(tty, rows, cols); err != nil {
 		_ = tty.Close()
 		return fail(err)
 	}
 	return master, tty, nil
+}
+
+// setSize sets the terminal size; the kernel signals SIGWINCH to the terminal's foreground
+// process group.
+func setSize(f *os.File, rows, cols int) error {
+	size := struct{ rows, cols, x, y uint16 }{uint16(min(rows, 1000)), uint16(min(cols, 1000)), 0, 0} //nolint:gosec // bounded above, positive
+	return ioctl(f, syscall.TIOCSWINSZ, &size)
 }
 
 // ioctl runs an ioctl on f without switching it to blocking mode (as f.Fd() would), so reads

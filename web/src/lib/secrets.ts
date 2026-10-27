@@ -1,5 +1,5 @@
 // The Secrets page of the Admin area: which declared secrets are available where.
-import type { Isolation, SecretsOverview } from '../api'
+import type { ExecutorEnvironment, Isolation, SecretsOverview } from '../api'
 
 export type SecretCell = { state: 'ok' } | { state: 'missing'; names: string[] } | { state: 'n/a' }
 
@@ -30,4 +30,15 @@ export function isolationSummary(i: Isolation): { tone: 'ok' | 'warn' | 'bad'; t
   if (!i.active) return { tone: 'bad', text: `Not sandboxed (ISOLATION=${i.mode}): ${i.reason ?? 'unknown reason'}` }
   if (!i.signal_scoping) return { tone: 'warn', text: `Sandboxed with Landlock ABI ${i.abi}; signals are not scoped (needs ABI 6, kernel 6.12)` }
   return { tone: 'ok', text: `Sandboxed with Landlock ABI ${i.abi}, signals scoped` }
+}
+
+/** One-line state of an executor environment: down without connected pods, else its load. */
+export function executorSummary(x: ExecutorEnvironment): { tone: 'ok' | 'warn' | 'bad'; text: string } {
+  if (!x.pods.length) return { tone: 'bad', text: 'Down: no executor connected, runs are refused' }
+  const busy = x.pods.reduce((n, p) => n + p.busy, 0)
+  const capacity = x.pods.reduce((n, p) => n + p.capacity, 0)
+  const unsandboxed = x.pods.filter((p) => !p.isolation.active).length
+  const text = `${x.pods.length} connected, ${busy}/${capacity} busy`
+  if (unsandboxed) return { tone: 'warn', text: `${text}; ${unsandboxed} not sandboxed` }
+  return { tone: 'ok', text }
 }

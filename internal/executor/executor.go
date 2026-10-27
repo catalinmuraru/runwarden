@@ -116,20 +116,20 @@ func (e *Executor) Start(req Request) (*Run, error) {
 	if req.Script == nil || len(req.Script.Command) == 0 {
 		return nil, errors.New("executor: no script to run")
 	}
-	user := strings.ToLower(req.User)
-	e.mu.Lock()
-	if e.limits.MaxPerUser > 0 && user != "" && e.byUser[user] >= e.limits.MaxPerUser {
-		e.mu.Unlock()
-		return nil, ErrUserBusy
+	return e.StartJob(e.Job(req))
+}
+
+// StartJob launches a prepared run, like Start.
+func (e *Executor) StartJob(job Job) (*Run, error) {
+	if len(job.Command) == 0 {
+		return nil, errors.New("executor: no command to run")
 	}
-	e.byUser[user]++ // reserved before starting, so concurrent requests cannot both pass
-	e.mu.Unlock()
-	release := func() {
-		e.mu.Lock()
-		if e.byUser[user]--; e.byUser[user] <= 0 {
-			delete(e.byUser, user)
-		}
-		e.mu.Unlock()
+	if job.ID == "" {
+		job.ID = e.nextID()
+	}
+	release, err := e.reserve(job.User)
+	if err != nil {
+		return nil, err
 	}
 
 	select {
@@ -138,7 +138,7 @@ func (e *Executor) Start(req Request) (*Run, error) {
 		release()
 		return nil, ErrBusy
 	}
-	r, err := e.start(req, release)
+	r, err := e.start(job, release)
 	if err != nil {
 		<-e.sem
 		release()
@@ -154,22 +154,66 @@ func (e *Executor) Start(req Request) (*Run, error) {
 	return r, nil
 }
 
+// reserve takes one of user's run slots, before starting, so concurrent requests cannot both
+// pass the per-user limit. release gives it back.
+func (e *Executor) reserve(user string) (release func(), err error) {
+	user = strings.ToLower(user)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.limits.MaxPerUser > 0 && user != "" && e.byUser[user] >= e.limits.MaxPerUser {
+		return nil, ErrUserBusy
+	}
+	e.byUser[user]++
+	return func() {
+		e.mu.Lock()
+		if e.byUser[user]--; e.byUser[user] <= 0 {
+			delete(e.byUser, user)
+		}
+		e.mu.Unlock()
+	}, nil
+}
+
+// Adopt tracks a run whose process lives elsewhere (see NewRemote), so Get, Running, RunningFor,
+// Forget and Shutdown cover it. It applies the per-user limit, not MaxConcurrent: the executor
+// running it has its own. start is called with the user's slot reserved.
+func (e *Executor) Adopt(user string, start func() (*Run, error)) (*Run, error) {
+	release, err := e.reserve(user)
+	if err != nil {
+		return nil, err
+	}
+	r, err := start()
+	if err != nil {
+		release()
+		return nil, err
+	}
+	e.mu.Lock()
+	e.runs[r.ID] = r
+	e.mu.Unlock()
+	go func() {
+		<-r.done
+		release()
+	}()
+	return r, nil
+}
+
 // start launches the process; onEnd runs when it has ended, before Done is closed.
-func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
-	id := e.nextID()
-	s := req.Script
-	inv := params.Build(s.Parameters, req.Values, id)
-	terminal := s.RequiresTerminal && ptySupported
+func (e *Executor) start(job Job, onEnd func()) (*Run, error) {
+	id := job.ID
+	redact, err := compileAll(job.Redact)
+	if err != nil {
+		return nil, err
+	}
+	terminal := job.Terminal && ptySupported
 	fixed := map[string]string{}
-	if req.User != "" {
-		fixed["RUNWARDEN_USER"] = req.User
+	if job.User != "" {
+		fixed["RUNWARDEN_USER"] = job.User
 	}
 	if terminal {
 		fixed["TERM"] = "xterm-256color"
 	}
 	// A private TMPDIR (and HOME) per run, so concurrent runs neither collide on files nor see
 	// each other's credentials and contexts.
-	tmpDir, vars, err := e.env.prepareRunDir(id, req.Kube)
+	tmpDir, vars, err := e.env.prepareRunDir(id, job.Kube)
 	if err != nil {
 		return nil, err
 	}
@@ -182,41 +226,41 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 		}
 		return nil, err
 	}
-	ws, err := e.env.prepareWorkspace(req.User, false)
+	ws, err := e.env.prepareWorkspace(job.User, false)
 	if err != nil {
 		return fail(err)
 	}
 	for k, v := range ws.vars {
 		fixed[k] = v
 	}
-	env, refused := e.env.build(inv.Env, req.Secrets, fixed)
+	env, refused := e.env.build(job.Env, job.Secrets, fixed)
 	for _, name := range refused {
-		logger().Warn("env variable refused for parameter", "script", s.Name, "variable", name)
+		logger().Warn("env variable refused for parameter", "script", job.Script, "variable", name)
 	}
 
-	name, args, env := e.wrap(s.Command[0], append(slices.Clone(s.Command[1:]), inv.Args...), env,
-		[]string{ws.shared, req.Uploads}, []string{tmpDir, ws.own})
+	name, args, env := e.wrap(job.Command[0], slices.Clone(job.Command[1:]), env,
+		[]string{ws.shared, job.Uploads}, []string{tmpDir, ws.own})
 	// No context: a canceled context would kill only the main process, while runs end through
 	// Stop/Kill/timeout, which signal the whole process group.
 	cmd := exec.Command(name, args...) //nolint:gosec,noctx // program from a validated config, no shell
-	cmd.Dir = s.WorkingDirectory
+	cmd.Dir = job.Dir
 	cmd.Env = env
 
 	// outR is what we read output from; child is the side the child gets and we close after start.
 	var (
-		outR, child *os.File
-		stdin       io.WriteCloser
+		outR, child, pty *os.File
+		stdin            io.WriteCloser
 	)
 	if terminal {
 		// One terminal for stdin, stdout and stderr, as when a user runs the script by hand.
 		var tty *os.File
-		outR, tty, err = openPTY()
+		outR, tty, err = openPTY(job.Rows, job.Cols)
 		if err != nil {
 			return fail(err)
 		}
 		preparePTY(cmd)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
-		stdin, child = outR, tty
+		stdin, child, pty = outR, tty, outR
 	} else {
 		if err := prepare(cmd); err != nil {
 			return fail(err)
@@ -235,39 +279,40 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 		child = outW
 	}
 
-	timeout := e.Timeout(req.Timeout)
-	masked := slices.Clone(inv.SecureValues)
-	for _, v := range req.Secrets {
+	timeout := e.Timeout(job.Timeout)
+	masked := slices.Clone(job.Secure)
+	for _, v := range job.Secrets {
 		masked = append(masked, v)
 	}
-	m := newMasker(masked, s.RedactPatterns)
+	m := newMasker(masked, redact)
 	r := &Run{
 		ID:         id,
-		ScriptName: s.Name,
-		User:       req.User,
+		ScriptName: job.Script,
+		User:       job.User,
 		onEnd:      onEnd,
-		MaskedArgs: append(append([]string(nil), s.Command[1:]...), inv.MaskedArgs...),
+		MaskedArgs: job.MaskedArgs,
 		Terminal:   terminal,
 		grace:      e.limits.KillGrace,
 		out:        newOutput(e.limits.MaxOutputBytes),
 		done:       make(chan struct{}),
 		mask:       m,
 		tmpDir:     tmpDir,
+		pty:        pty,
 		stdin:      stdin,
-		pending:    inv.Stdin,
+		pending:    job.Stdin,
 		result:     Result{Status: StatusRunning},
 	}
 
 	if err := cmd.Start(); err != nil {
 		_ = outR.Close()
 		_ = child.Close()
-		return fail(fmt.Errorf("start %s: %w", s.Name, err))
+		return fail(fmt.Errorf("start %s: %w", job.Script, err))
 	}
 	_ = child.Close() // the child holds its own copy
 	r.pid = cmd.Process.Pid
 	r.Started = time.Now()
 	r.result.Started = r.Started
-	logger().Info("run started", "run", id, "script", s.Name, "args", r.MaskedArgs, "timeout", timeout, "terminal", terminal)
+	logger().Info("run started", "run", id, "script", job.Script, "args", r.MaskedArgs, "timeout", timeout, "terminal", terminal)
 
 	pumpDone := make(chan struct{})
 	r.answerPrompts(nil) // stdin values that don't wait for a prompt

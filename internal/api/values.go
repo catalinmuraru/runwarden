@@ -99,12 +99,11 @@ func (h *helpers) put(key string, out []byte, now time.Time) {
 	h.cache[key] = cached{out: out, expires: now.Add(h.ttl)}
 }
 
-// capture runs a helper command through the executor, within the helper limits and cache.
-// Failures are not cached. secrets and the kubeconfig (of the environment the helper works on)
-// are part of the cache key, so output computed with one environment's credentials or cluster
+// capture runs a helper command with run, within the helper limits and cache. Failures are not
+// cached. key must name everything the output depends on: the command, its directory and the
+// environment's credentials or cluster (see runHelper), so output computed for one environment
 // is not reused for another.
-func (s *Server) capture(ctx context.Context, args []string, dir string, secrets map[string]string, kc *executor.Kube) ([]byte, error) {
-	key := dir + "\x00" + strings.Join(args, "\x00") + "\x00" + fingerprint(secrets) + "\x00" + kubeFingerprint(kc)
+func (s *Server) capture(ctx context.Context, key string, run func(context.Context) ([]byte, error)) ([]byte, error) {
 	now := time.Now()
 	if out, ok := s.helpers.get(key, now); ok {
 		return out, nil
@@ -115,7 +114,7 @@ func (s *Server) capture(ctx context.Context, args []string, dir string, secrets
 		return nil, errHelpersBusy
 	}
 	defer s.helpers.release(user)
-	out, err := s.exec.Capture(ctx, args, dir, secrets, kc)
+	out, err := run(ctx)
 	if err != nil {
 		return nil, err
 	}

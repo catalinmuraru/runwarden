@@ -111,3 +111,25 @@ func TestIdleFlushReleasesPrompt(t *testing.T) {
 	_ = r.WriteInput("z", false)
 	waitDone(t, r)
 }
+
+func TestTerminalResize(t *testing.T) {
+	req := terminalScript(t, "resize.sh")
+	e := New(Limits{}, EnvPolicy{})
+	job := e.Job(req)
+	job.Rows, job.Cols = 30, 90
+	r, err := e.StartJob(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitOutput(t, r, "30 90")
+	if err := r.Resize(50, 160); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteInput("", false); err != nil {
+		t.Fatal(err)
+	}
+	waitDone(t, r)
+	if out := outputOf(r); !strings.Contains(out, "50 160") {
+		t.Errorf("size after resize not seen:\n%s", out)
+	}
+}

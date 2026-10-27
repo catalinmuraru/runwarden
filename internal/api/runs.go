@@ -85,31 +85,44 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	// Only the secrets the script declares, from the environments it touches (checked above).
-	sec, err := s.resolveSecrets(sc, uses)
-	switch {
-	case secretRefusal(err):
+	env, onExecutor, err := s.executorEnv(uses)
+	if err != nil {
 		refused(err.Error())
 		writeError(w, http.StatusConflict, err.Error())
-		return
-	case err != nil:
-		slog.Error("resolve secrets", "script", sc.Name, "err", err)
-		refused("could not read secrets")
-		writeError(w, http.StatusInternalServerError, "could not start the run")
 		return
 	}
-	// The cluster of the environment, for scripts that use one; refused like a missing secret.
-	kc, clusters, err := s.resolveKube(sc, uses)
-	switch {
-	case secretRefusal(err):
-		refused(err.Error())
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	case err != nil:
-		slog.Error("resolve kubeconfig", "script", sc.Name, "err", err)
-		refused("could not read the kubeconfig")
-		writeError(w, http.StatusInternalServerError, "could not start the run")
-		return
+	req := executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout, Uploads: uploadDir}
+	// Secrets of an executor environment exist only on its executors, which add them.
+	secretNames := slices.Sorted(slices.Values(sc.Secrets))
+	var clusters []history.Cluster
+	if !onExecutor {
+		// Only the secrets the script declares, from the environments it touches (checked above).
+		sec, err := s.resolveSecrets(sc, uses)
+		switch {
+		case secretRefusal(err):
+			refused(err.Error())
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		case err != nil:
+			slog.Error("resolve secrets", "script", sc.Name, "err", err)
+			refused("could not read secrets")
+			writeError(w, http.StatusInternalServerError, "could not start the run")
+			return
+		}
+		req.Secrets, secretNames = sec.Env, sec.Names()
+		// The cluster of the environment, for scripts that use one; refused like a missing secret.
+		req.Kube, clusters, err = s.resolveKube(sc, uses)
+		switch {
+		case secretRefusal(err):
+			refused(err.Error())
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		case err != nil:
+			slog.Error("resolve kubeconfig", "script", sc.Name, "err", err)
+			refused("could not read the kubeconfig")
+			writeError(w, http.StatusInternalServerError, "could not start the run")
+			return
+		}
 	}
 	if problems := s.checkDynamicValues(r, sc, raw, values); len(problems) > 0 {
 		refused("invalid parameters: " + strings.Join(problems, "; "))
@@ -117,8 +130,22 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout, Secrets: sec.Env, Kube: kc, Uploads: uploadDir})
+	var run *executor.Run
+	if onExecutor {
+		run, clusters, err = s.startRemote(r.Context(), env, req)
+	} else {
+		run, err = s.exec.Start(req)
+	}
+	var refusal *startError
 	switch {
+	case errors.Is(err, errNoExecutor):
+		refused(err.Error())
+		writeError(w, http.StatusServiceUnavailable, err.Error()+"; try again later or ask an administrator")
+		return
+	case errors.As(err, &refusal):
+		refused(err.Error())
+		writeError(w, http.StatusConflict, "the executor could not start the run: "+err.Error())
+		return
 	case errors.Is(err, executor.ErrUserBusy):
 		refused("user already has a run in progress")
 		writeError(w, http.StatusTooManyRequests, "you already have a run in progress; wait for it to finish or stop it", s.exec.RunningFor(user.Name)...)
@@ -141,10 +168,13 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	end := audit.Event{Action: audit.RunEnd, Category: "process", Type: "end", RunID: run.ID, Script: sc.Name,
 		User: user.Name, Roles: s.opts.Access.Roles(user), Groups: user.Groups, AuthMethod: user.Method,
 		SourceIP: s.opts.ClientIP.IP(r), UserAgent: r.UserAgent(), Values: masked, Args: run.MaskedArgs, Environments: envs,
-		Secrets: sec.Names()}
+		Secrets: secretNames}
 	meta := history.Meta{Script: sc.Name, User: user.Name, Args: run.MaskedArgs, Values: masked, Environments: envs,
-		Secrets: sec.Names(), Clusters: clusters, Terminal: run.Terminal}
+		Secrets: secretNames, Clusters: clusters, Terminal: run.Terminal}
 	files := history.OutputFiles{Patterns: sc.OutputFiles, Dir: sc.WorkingDirectory}
+	if onExecutor {
+		files = history.OutputFiles{} // they stay on the executor's disk
+	}
 	err = s.hist.Track(run, meta, files, func() {
 		res := run.Result()
 		code := res.ExitCode
@@ -167,7 +197,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r, audit.Event{Action: audit.RunStart, Category: "process", Type: "start", Success: true,
-		RunID: run.ID, Script: sc.Name, Values: masked, Args: run.MaskedArgs, Environments: envs, Secrets: sec.Names(),
+		RunID: run.ID, Script: sc.Name, Values: masked, Args: run.MaskedArgs, Environments: envs, Secrets: secretNames,
 		Message: fmt.Sprintf("run %s of %q started by %s", run.ID, sc.Name, user.Name)})
 
 	w.Header().Set("Location", "/api/runs/"+run.ID)
