@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api, ApiError, type Option, type ScriptDetail } from '../api'
 import ParamField from '../components/ParamField.vue'
+import RunPanel from '../components/RunPanel.vue'
 import { accessSummary, decorateOptions, startBlocker } from '../lib/access'
 import { buildRunBody, dependencyQuery, fieldErrors, initialValue, type FieldValue } from '../lib/form'
 import { renderMarkdown } from '../lib/markdown'
@@ -11,6 +12,9 @@ import { refreshRunning } from '../lib/running'
 
 const props = defineProps<{ name: string }>()
 const router = useRouter()
+const route = useRoute()
+// The run shown under the form: the one just started here, or one opened with ?run=.
+const runId = computed(() => (typeof route.query.run === 'string' ? route.query.run : ''))
 
 const script = ref<ScriptDetail | null>(null)
 const loadError = ref('')
@@ -102,7 +106,7 @@ async function run() {
   try {
     const { id } = await api.startRun(props.name, buildRunBody(script.value.parameters, values, touched))
     refreshRunning()
-    await router.push({ name: 'run', params: { id } })
+    await router.replace({ name: 'script', params: { name: props.name }, query: { run: id } })
   } catch (e) {
     if (e instanceof ApiError && e.status === 403) {
       formErrors.value = [e.message]
@@ -130,18 +134,22 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
 <template>
   <p v-if="loadError" class="alert" role="alert">{{ loadError }}</p>
   <p v-else-if="!script" class="muted">Loading…</p>
-  <template v-else>
-    <p class="muted"><RouterLink to="/">Scripts</RouterLink> / {{ script.group || 'Other' }}</p>
-    <h1>{{ script.name }}</h1>
-    <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown escapes everything first -->
-    <div v-if="script.description" class="description" v-html="renderMarkdown(script.description)" />
-    <p v-if="environments.run.length || environments.view.length" class="muted small">
-      <template v-if="environments.run.length">You can run it on {{ environments.run.join(', ') }}.</template>
-      <template v-if="environments.view.length"> View only on {{ environments.view.join(', ') }}.</template>
-    </p>
-    <p v-if="script.timeout_seconds" class="muted small">Runs are stopped automatically after {{ formatSeconds(script.timeout_seconds) }}.</p>
+  <div v-else class="script-page">
+    <form class="script-top" novalidate @submit.prevent="run">
+      <div class="script-title">
+        <h1>{{ script.name }}</h1>
+        <span class="muted small">{{ script.group || 'Other' }}</span>
+        <span class="spacer" />
+        <RouterLink class="small" :to="{ name: 'runs', query: { script: script.name } }">Previous runs</RouterLink>
+      </div>
+      <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown escapes everything first -->
+      <div v-if="script.description" class="description" v-html="renderMarkdown(script.description)" />
+      <p v-if="environments.run.length || environments.view.length || script.timeout_seconds" class="muted small">
+        <template v-if="environments.run.length">You can run it on {{ environments.run.join(', ') }}.</template>
+        <template v-if="environments.view.length"> View only on {{ environments.view.join(', ') }}.</template>
+        <template v-if="script.timeout_seconds"> Runs are stopped automatically after {{ formatSeconds(script.timeout_seconds) }}.</template>
+      </p>
 
-    <form class="card stack" style="margin-top: 1rem" novalidate @submit.prevent="run">
       <div v-if="script.parameters.length" class="form-grid">
         <ParamField
           v-for="p in script.parameters"
@@ -155,7 +163,6 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
           @update:model-value="update(p.name, $event)"
         />
       </div>
-      <p v-else class="muted">This script has no parameters.</p>
 
       <div v-if="formErrors.length" class="alert" role="alert">
         Could not start the script.
@@ -164,13 +171,14 @@ onBeforeUnmount(() => timers.forEach((t) => clearTimeout(t)))
         </ul>
         <RouterLink v-if="busyRun" :to="{ name: 'run', params: { id: busyRun } }">Open your running run</RouterLink>
       </div>
-      <p v-if="blocker" class="muted" role="status">{{ blocker }}</p>
       <div class="row">
         <button class="btn btn-primary" type="submit" :disabled="submitting || !!blocker">
-          {{ submitting ? 'Starting…' : 'Run' }}
+          {{ submitting ? 'Starting…' : 'Execute' }}
         </button>
-        <RouterLink :to="{ name: 'runs', query: { script: script.name } }">Previous runs</RouterLink>
+        <span v-if="blocker" class="muted small" role="status">{{ blocker }}</span>
       </div>
     </form>
-  </template>
+
+    <RunPanel v-if="runId" :id="runId" />
+  </div>
 </template>
