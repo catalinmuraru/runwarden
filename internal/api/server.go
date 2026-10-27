@@ -17,6 +17,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
 	"github.com/catalinmuraru/runwarden/internal/kube"
+	"github.com/catalinmuraru/runwarden/internal/remote"
 	"github.com/catalinmuraru/runwarden/internal/sandbox"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
 	"github.com/catalinmuraru/runwarden/internal/settings"
@@ -47,6 +48,9 @@ type Options struct {
 	// Isolation is how runs are separated from each other (Landlock), shown in the Admin area
 	// and on the readiness probe.
 	Isolation sandbox.Status
+	// Executors, if set, runs the runs and helpers of its environments on their executors
+	// (EXECUTORS); every other environment runs here.
+	Executors *remote.Hub
 	// Helper scripts (dropdown values, defaults): concurrent calls per user and in total
 	// (defaults 2 and 10), and how long their output is reused (0: not cached).
 	ValuesMaxPerUser int
@@ -170,6 +174,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	h("GET /api/admin/activity", s.adminOnly(s.adminActivity))
 	h("POST /api/admin/users/{name}/sign-out", s.adminOnly(s.adminSignOut))
 	h("GET /api/admin/secrets", s.adminOnly(s.adminSecrets))
+	if s.opts.Executors != nil {
+		// Executors authenticate with their environment's token, not a user session.
+		mux.Handle("GET "+remote.Path, s.opts.Executors)
+	}
 	h("PUT /api/admin/settings/ui", s.adminOnly(s.putUISettings))
 	h("GET /api/admin/policy", s.policyOnly(s.getPolicy))
 	h("PUT /api/admin/policy/environments", s.policyOnly(s.putEnvironments))

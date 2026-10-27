@@ -27,6 +27,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/kube"
 	"github.com/catalinmuraru/runwarden/internal/logging"
 	"github.com/catalinmuraru/runwarden/internal/policy"
+	"github.com/catalinmuraru/runwarden/internal/remote"
 	"github.com/catalinmuraru/runwarden/internal/sandbox"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
 	"github.com/catalinmuraru/runwarden/internal/settings"
@@ -113,6 +114,10 @@ func run() error {
 	if sb != nil {
 		ex.WithSandbox(sb)
 	}
+	hub, err := newHub(cfg)
+	if err != nil {
+		return fmt.Errorf("configuration: %w", err)
+	}
 	access, err := newAccess(cfg)
 	if err != nil {
 		return err
@@ -130,6 +135,7 @@ func run() error {
 	}
 	opts := api.Options{
 		Isolation:      isolation,
+		Executors:      hub,
 		BaseDir:        cfg.BaseDir,
 		DataDir:        cfg.DataDir,
 		MaxUploadBytes: cfg.MaxUploadBytes,
@@ -171,7 +177,7 @@ func run() error {
 	// Probes get their own listener, which the Service and ingress do not expose.
 	health := &http.Server{
 		Addr:              cfg.HealthAddr,
-		Handler:           newHealthMux(apiSrv, isolation),
+		Handler:           newHealthMux(apiSrv, isolation, hub),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errc := make(chan error, 2)
@@ -427,8 +433,10 @@ func newMux(apiSrv *api.Server, authH *auth.Handler) *http.ServeMux {
 }
 
 // newHealthMux serves the liveness and readiness probes. The readiness body also says how runs
-// are isolated (ISOLATION=required never gets this far without a sandbox).
-func newHealthMux(apiSrv *api.Server, isolation sandbox.Status) *http.ServeMux {
+// are isolated (ISOLATION=required never gets this far without a sandbox) and which executor
+// environments have executors connected. A missing executor does not make the server unready:
+// only that environment's runs are refused.
+func newHealthMux(apiSrv *api.Server, isolation sandbox.Status, hub *remote.Hub) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
@@ -437,7 +445,7 @@ func newHealthMux(apiSrv *api.Server, isolation sandbox.Status) *http.ServeMux {
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("ok\nisolation: " + describeIsolation(isolation) + "\n"))
+		_, _ = w.Write([]byte("ok\nisolation: " + describeIsolation(isolation) + "\n" + describeExecutors(hub)))
 	})
 	return mux
 }

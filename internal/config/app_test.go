@@ -391,3 +391,25 @@ func TestLoadExecutor(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutorsSetting(t *testing.T) {
+	base := map[string]string{"AUTH_METHODS": "none", "ALLOW_NO_AUTH": "true"}
+	hash := strings.Repeat("ab", 32)
+	set := maps.Clone(base)
+	set["EXECUTORS"] = `{"production": "` + hash + `"}`
+	app, err := LoadApp(env(set))
+	if err != nil || app.ExecutorTokens["production"] != hash || len(app.ExecutorTokens) != 1 {
+		t.Fatalf("EXECUTORS: %v, %v", app.ExecutorTokens, err)
+	}
+	for raw, want := range map[string]string{ //nolint:gosec // no credentials: invalid token hashes
+		`["production"]`:                     "want JSON",
+		`{"../prod": "` + hash + `"}`:        "invalid environment name",
+		`{"production": "the-token"}`:        "hex SHA-256",
+		`{"production": "` + hash[2:] + `"}`: "hex SHA-256",
+	} {
+		set["EXECUTORS"] = raw
+		if _, err := LoadApp(env(set)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", raw, err, want)
+		}
+	}
+}

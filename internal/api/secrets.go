@@ -33,14 +33,10 @@ func (s *Server) resolveSecrets(sc *config.Script, uses []authz.EnvUse) (secrets
 	return s.opts.Secrets.Resolve(sc.Secrets, targets, sources)
 }
 
-// helperEnv returns the secrets and the kubeconfig a helper of sc gets: those of the
-// environments selected by raw values (or the parameters' defaults). A helper called before an
-// environment is chosen (such as the one listing the environments) gets no kubeconfig.
-func (s *Server) helperEnv(sc *config.Script, raw func(string) (any, bool)) (map[string]string, *executor.Kube, error) {
-	if len(sc.Secrets) == 0 && !sc.Kubernetes {
-		return nil, nil, nil
-	}
-	uses := s.opts.Access.Uses(sc, func(name string) []string {
+// helperUses returns the environments a helper of sc works on: those selected by raw values (or
+// the parameters' defaults).
+func (s *Server) helperUses(sc *config.Script, raw func(string) (any, bool)) []authz.EnvUse {
+	return s.opts.Access.Uses(sc, func(name string) []string {
 		p := sc.Parameter(name)
 		if p == nil {
 			return nil
@@ -55,6 +51,15 @@ func (s *Server) helperEnv(sc *config.Script, raw func(string) (any, bool)) (map
 		}
 		return valueItems(v)
 	})
+}
+
+// helperEnv returns the secrets and the kubeconfig a helper of sc gets for uses (see
+// helperUses). A helper called before an environment is chosen (such as the one listing the
+// environments) gets no kubeconfig.
+func (s *Server) helperEnv(sc *config.Script, uses []authz.EnvUse) (map[string]string, *executor.Kube, error) {
+	if len(sc.Secrets) == 0 && !sc.Kubernetes {
+		return nil, nil, nil
+	}
 	res, err := s.resolveSecrets(sc, uses)
 	if err != nil {
 		return nil, nil, err
@@ -74,8 +79,10 @@ func (s *Server) helperEnv(sc *config.Script, raw func(string) (any, bool)) (map
 func secretRefusal(err error) bool {
 	var missing *secrets.MissingError
 	var noCluster *kube.MissingError
+	var refused *startError
 	return errors.As(err, &missing) || errors.Is(err, secrets.ErrSeveralTargets) ||
-		errors.As(err, &noCluster) || errors.Is(err, kube.ErrSeveralTargets) || errors.Is(err, kube.ErrNoEnvironment)
+		errors.As(err, &noCluster) || errors.Is(err, kube.ErrSeveralTargets) || errors.Is(err, kube.ErrNoEnvironment) ||
+		errors.Is(err, errExecutorScope) || errors.As(err, &refused)
 }
 
 type secretsScript struct {
@@ -94,6 +101,33 @@ func (s *Server) adminSecrets(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not read the secrets directory")
 		return
 	}
+	if inv == nil {
+		inv = map[string][]string{}
+	}
+	// Executor environments: the secrets their executors report (none mounted here). Without a
+	// connected executor, what they hold is unknown, so nothing is reported missing there.
+	execs := s.executorOverview()
+	reported := map[string][]string{} // executor environment → its names, including its common ones
+	for _, x := range execs {
+		delete(inv, x.Environment)
+		if len(x.Pods) == 0 {
+			continue
+		}
+		reported[x.Environment] = []string{}
+		for _, info := range x.Secrets {
+			reported[x.Environment] = append(reported[x.Environment], info.Name)
+			if info.Environment == x.Environment {
+				inv[x.Environment] = append(inv[x.Environment], info.Name)
+			}
+		}
+	}
+	has := func(env, name string) bool {
+		if s.opts.Executors != nil && s.opts.Executors.Remote(env) {
+			names, ok := reported[env]
+			return !ok || slices.Contains(names, name)
+		}
+		return slices.Contains(inv[env], name) || slices.Contains(inv[secrets.Common], name)
+	}
 	envs := s.opts.Access.Policy().EnvironmentNames()
 	out := []secretsScript{}
 	if c := s.catalog.Load(); c != nil {
@@ -108,7 +142,7 @@ func (s *Server) adminSecrets(w http.ResponseWriter, _ *http.Request) {
 			}
 			for _, env := range check {
 				for _, name := range sc.Secrets {
-					if !slices.Contains(inv[env], name) && !slices.Contains(inv[secrets.Common], name) {
+					if !has(env, name) {
 						row.Missing[env] = append(row.Missing[env], name)
 					}
 				}
@@ -124,10 +158,7 @@ func (s *Server) adminSecrets(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	slices.Sort(unknown)
-	if inv == nil {
-		inv = map[string][]string{}
-	}
-	kc, err := s.kubeOverview(envs)
+	kc, err := s.kubeOverview(envs, execs)
 	if err != nil {
 		slog.Error("kubeconfig inventory", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not read the kubeconfig directory")
@@ -141,6 +172,7 @@ func (s *Server) adminSecrets(w http.ResponseWriter, _ *http.Request) {
 		"scripts":      out,
 		"kubernetes":   kc,
 		"isolation":    s.opts.Isolation,
+		"executors":    execs,
 	})
 }
 
@@ -165,14 +197,22 @@ type kubeOverview struct {
 }
 
 // kubeOverview lists the cluster of each environment's kubeconfig (server, never credentials)
-// and the environments where a "kubernetes" runner cannot start.
-func (s *Server) kubeOverview(envs []string) (kubeOverview, error) {
+// and the environments where a "kubernetes" runner cannot start. Executor environments show the
+// cluster their first executor reports; without a connected executor they are not listed.
+func (s *Server) kubeOverview(envs []string, execs []executorEnvironment) (kubeOverview, error) {
 	inv, err := s.opts.Kube.Inventory()
 	if err != nil {
 		return kubeOverview{}, err
 	}
 	out := kubeOverview{Configured: s.opts.Kube.Dir != "", Clusters: []kubeCluster{}, UnknownDirs: []string{}, Scripts: []kubeScript{}}
 	usable := map[string]bool{}
+	for _, x := range execs {
+		if len(x.Pods) == 0 {
+			usable[x.Environment] = true // unknown: not reported missing
+		} else if x.cluster != nil {
+			inv = append(inv, *x.cluster)
+		}
+	}
 	for _, st := range inv {
 		out.Clusters = append(out.Clusters, kubeCluster{Environment: st.Environment, Context: st.Context,
 			Server: st.Server, Namespace: st.Namespace, Error: st.Error})

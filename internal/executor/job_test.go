@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -100,5 +101,45 @@ func TestRemoteRun(t *testing.T) {
 	r.Kill() // finished: nothing is sent
 	if len(ctl.calls) != 5 {
 		t.Errorf("control called after the end: %q", ctl.calls)
+	}
+}
+
+func TestAdopt(t *testing.T) {
+	e := New(Limits{MaxPerUser: 1}, EnvPolicy{})
+	var feed *Feed
+	start := func(id string) func() (*Run, error) {
+		return func() (*Run, error) {
+			r, f, err := NewRemote(Job{ID: id, Script: "s", User: "Alice"}, 0, &fakeControl{})
+			feed = f
+			return r, err
+		}
+	}
+	r, err := e.Adopt("Alice", start("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Get("r1") != r || !slices.Equal(e.Running(), []string{"r1"}) || !slices.Equal(e.RunningFor("alice"), []string{"r1"}) {
+		t.Errorf("adopted run not tracked: %v", e.Running())
+	}
+	if _, err := e.Adopt("alice", start("r2")); !errors.Is(err, ErrUserBusy) {
+		t.Errorf("second run of alice = %v, want ErrUserBusy", err)
+	}
+	if _, err := e.Adopt("bob", func() (*Run, error) { return nil, ErrBusy }); !errors.Is(err, ErrBusy) {
+		t.Errorf("failed start = %v", err)
+	}
+	feed.End(Result{Status: StatusFinished})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := e.Adopt("alice", start("r3")); err == nil {
+			break // the slot was given back when r1 ended
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("alice's slot was not released")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e.Forget("r1")
+	if e.Get("r1") != nil {
+		t.Error("finished run not forgotten")
 	}
 }

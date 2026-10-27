@@ -47,9 +47,12 @@ type App struct {
 	ValuesMaxGlobal   int           // VALUES_MAX_GLOBAL, default 10
 	ValuesCacheTTL    time.Duration // VALUES_CACHE_TTL, default 60s; 0 disables the cache
 	ActivityMaxDay    int64         // ACTIVITY_MAX_DAY_BYTES, default 50Mi; then failed sign-ins are not kept
-	Auth              Auth
-	Access            Access
-	Executor          Executor // only in executor mode
+	// ExecutorTokens (EXECUTORS, JSON {"<environment>": "<hex SHA-256 of its executor token>"})
+	// lists the environments whose runs execute on their executors; all others run here.
+	ExecutorTokens map[string]string
+	Auth           Auth
+	Access         Access
+	Executor       Executor // only in executor mode
 }
 
 // Executor is what `runwarden executor` needs besides the run settings of App.
@@ -194,6 +197,8 @@ func LoadExecutor(getenv func(string) string, environment string) (App, error) {
 // executorEnv matches environment directory names (as the secrets and kube stores do).
 var executorEnv = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
+var sha256Hex = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
 func load(getenv func(string) string, executorMode bool) (App, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -324,6 +329,19 @@ func load(getenv func(string) string, executorMode bool) (App, error) {
 	}
 	if executorMode {
 		return app, errors.Join(errs...)
+	}
+	if raw := str("EXECUTORS", ""); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &app.ExecutorTokens); err != nil {
+			errs = append(errs, fmt.Errorf(`EXECUTORS: want JSON {"<environment>": "<sha256 of its token>"}: %w`, err))
+		}
+		for env, hash := range app.ExecutorTokens {
+			if !executorEnv.MatchString(env) {
+				errs = append(errs, fmt.Errorf("EXECUTORS: invalid environment name %q", env))
+			}
+			if !sha256Hex.MatchString(hash) {
+				errs = append(errs, fmt.Errorf("EXECUTORS: the token of %s must be its hex SHA-256 (64 hex digits), not the token", env))
+			}
+		}
 	}
 	app.Auth = loadAuth(getenv, str, dur, &errs)
 	app.Auth.MaxFailuresPerIP = count("LOGIN_MAX_FAILURES_PER_IP", 20)

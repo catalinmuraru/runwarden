@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +69,17 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		h.tokens[env] = b
 	}
 	return h, nil
+}
+
+// Remote reports whether env runs on executors (it has an executor token).
+func (h *Hub) Remote(env string) bool {
+	_, ok := h.tokens[env]
+	return ok
+}
+
+// Environments returns the environments that run on executors, sorted.
+func (h *Hub) Environments() []string {
+	return slices.Sorted(maps.Keys(h.tokens))
 }
 
 // authorized checks the bearer token of env in constant time.

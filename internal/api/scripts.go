@@ -207,12 +207,7 @@ func (s *Server) scriptDefault(ctx context.Context, sc *config.Script, p *params
 		return params.Value{}
 	}
 	// Defaults are computed before the user chose anything: the environment of the defaults.
-	sec, kc, err := s.helperEnv(sc, func(string) (any, bool) { return nil, false })
-	if err != nil {
-		slog.Warn("default script: secrets or kubeconfig", "script", sc.Name, "parameter", p.Name, "err", err)
-		return params.Value{}
-	}
-	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec, kc)
+	out, err := s.runHelper(ctx, sc, func(string) (any, bool) { return nil, false }, args)
 	if err != nil {
 		slog.Warn("default script failed", "script", sc.Name, "parameter", p.Name, "err", err)
 		return params.Value{}
@@ -289,6 +284,10 @@ func writeValuesError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusTooManyRequests, err.Error())
 		return
 	}
+	if errors.Is(err, errNoExecutor) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	var dep *dependencyError
 	if errors.As(err, &dep) {
 		writeError(w, http.StatusBadRequest, "parameters this list depends on are missing or invalid", dep.problems...)
@@ -338,11 +337,7 @@ func (s *Server) dynamicValues(ctx context.Context, sc *config.Script, p *params
 	if err != nil {
 		return nil, err
 	}
-	sec, kc, err := s.helperEnv(sc, raw)
-	if err != nil {
-		return nil, err
-	}
-	out, err := s.capture(ctx, s.resolveCommand(args), sc.WorkingDirectory, sec, kc)
+	out, err := s.runHelper(ctx, sc, raw, args)
 	if err != nil {
 		return nil, err
 	}
