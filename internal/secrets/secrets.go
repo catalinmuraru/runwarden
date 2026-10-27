@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Common is the directory of secrets that do not depend on the environment.
@@ -204,6 +205,46 @@ func (s Store) Inventory() (map[string][]string, error) {
 		}
 		slices.Sort(names)
 		out[e.Name()] = names
+	}
+	return out, nil
+}
+
+// Info describes one secret without its value.
+type Info struct {
+	Name        string    `json:"name"`
+	Environment string    `json:"environment"` // the directory: an environment or Common
+	Modified    time.Time `json:"modified"`
+}
+
+// Describe lists the secrets of the given environment directories by name and modification
+// time, never reading a value. Missing directories list nothing.
+func (s Store) Describe(envs ...string) ([]Info, error) {
+	var out []Info
+	for _, env := range envs {
+		if s.Dir == "" || env == "" || env == "-" {
+			continue
+		}
+		if !envPattern.MatchString(env) {
+			return nil, fmt.Errorf("invalid environment name %q", env)
+		}
+		dir := filepath.Join(s.Dir, env)
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if !NamePattern.MatchString(e.Name()) {
+				continue
+			}
+			info, err := os.Stat(filepath.Join(dir, e.Name())) // follows the Kubernetes symlinks
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			out = append(out, Info{Name: e.Name(), Environment: env, Modified: info.ModTime().UTC()})
+		}
 	}
 	return out, nil
 }
