@@ -136,3 +136,27 @@ func TestInventory(t *testing.T) {
 		t.Errorf("missing dir = %v %v", inv, err)
 	}
 }
+
+func TestDescribe(t *testing.T) {
+	s := setup(t)
+	infos, err := s.Describe("acceptance", Common, "missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, i := range infos {
+		if i.Modified.IsZero() {
+			t.Errorf("%s: no modification time", i.Name)
+		}
+		got = append(got, i.Environment+"/"+i.Name)
+	}
+	if want := []string{"acceptance/DB_PASSWORD", "common/PRIVATE_TOKEN"}; !slices.Equal(got, want) {
+		t.Errorf("Describe = %q, want %q", got, want)
+	}
+	if _, err := s.Describe("../etc"); err == nil {
+		t.Error("invalid environment name accepted")
+	}
+	if infos, err := (Store{}).Describe("production"); err != nil || infos != nil {
+		t.Errorf("no dir: %v %v", infos, err)
+	}
+}

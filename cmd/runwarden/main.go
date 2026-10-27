@@ -43,6 +43,9 @@ func main() {
 			os.Exit(sandbox.Main(os.Args[2:]))
 		case "check-config":
 			os.Exit(checkConfig(os.Args[2:], os.Stdout))
+		case "executor":
+			slog.SetDefault(slog.New(logging.NewECSHandler(os.Stdout, version, slog.LevelInfo)))
+			os.Exit(runExecutor(os.Args[2:], os.Stderr))
 		case "version", "--version":
 			fmt.Println(version)
 			return

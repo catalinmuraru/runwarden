@@ -368,3 +368,26 @@ func TestAccessSettings(t *testing.T) {
 		t.Errorf("non-JSON environments: %v", err)
 	}
 }
+
+func TestLoadExecutor(t *testing.T) {
+	app, err := LoadExecutor(env(map[string]string{
+		"EXECUTOR_SERVER_URL": "http://runwarden:8080", "EXECUTOR_TOKEN": "t0ken", //nolint:gosec // test value
+		"EXECUTOR_ENVIRONMENT": "dev", "POD_NAME": "exec-prod-0", "MAX_CONCURRENT_RUNS": "3",
+	}), "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := app.Executor
+	if x.ServerURL != "http://runwarden:8080" || x.Token != "t0ken" || x.Environment != "prod" || x.Pod != "exec-prod-0" || app.MaxConcurrentRuns != 3 {
+		t.Errorf("executor config %+v, runs %d", x, app.MaxConcurrentRuns)
+	}
+	if len(app.Auth.Methods) != 0 {
+		t.Errorf("executor mode read sign-in settings: %v", app.Auth.Methods)
+	}
+	_, err = LoadExecutor(env(map[string]string{"EXECUTOR_SERVER_URL": "ftp://x", "EXECUTOR_ENVIRONMENT": "../etc"}), "")
+	for _, want := range []string{"EXECUTOR_SERVER_URL", "EXECUTOR_TOKEN", "EXECUTOR_ENVIRONMENT"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing error for %s: %v", want, err)
+		}
+	}
+}

@@ -54,8 +54,10 @@ type Run struct {
 	out    *output
 	done   chan struct{}
 	mask   *masker
-	tmpDir string // per-run directory (TMPDIR, HOME), removed when the run ends
-	onEnd  func() // called when the run has ended, before done is closed
+	tmpDir string   // per-run directory (TMPDIR, HOME), removed when the run ends
+	onEnd  func()   // called when the run has ended, before done is closed
+	pty    *os.File // terminal master side, for Resize; nil without a terminal
+	ctl    Control  // set for a run executed elsewhere: input and signals go there
 
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser // nil once closed
@@ -100,6 +102,9 @@ func (r *Run) WriteInput(line string, secret bool) error {
 	if secret && r.mask != nil {
 		r.mask.addSecret(line)
 	}
+	if r.ctl != nil {
+		return r.ctl.Input(line, secret)
+	}
 	r.stdinMu.Lock()
 	defer r.stdinMu.Unlock()
 	return r.writeLocked(line)
@@ -108,6 +113,9 @@ func (r *Run) WriteInput(line string, secret bool) error {
 // CloseInput signals end of input: it closes the script's stdin, or on a terminal sends the
 // end-of-file character (Ctrl-D), as a user at a terminal would.
 func (r *Run) CloseInput() error {
+	if r.ctl != nil {
+		return r.ctl.CloseInput()
+	}
 	r.stdinMu.Lock()
 	defer r.stdinMu.Unlock()
 	if r.stdin == nil {
@@ -141,12 +149,22 @@ func (r *Run) Stop() { r.stop(StatusStopped) }
 
 // Kill kills the script and all of its children immediately.
 func (r *Run) Kill() {
-	r.setReason(StatusKilled, true)
+	if !r.setReason(StatusKilled, true) {
+		return
+	}
+	if r.ctl != nil {
+		r.ctl.Kill()
+		return
+	}
 	killGroup(r.pid)
 }
 
 func (r *Run) stop(reason Status) {
 	if !r.setReason(reason, false) {
+		return
+	}
+	if r.ctl != nil {
+		r.ctl.Stop() // the executor escalates to a kill after its grace period
 		return
 	}
 	terminateGroup(r.pid)
