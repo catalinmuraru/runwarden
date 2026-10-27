@@ -20,7 +20,7 @@ func get(t *testing.T, h http.Handler, method, path string) int {
 
 func TestProbes(t *testing.T) {
 	apiSrv := api.New(api.Options{}, nil, nil)
-	mux := newHealthMux(apiSrv, sandbox.Status{Mode: config.IsolationOff, Reason: "ISOLATION=off"})
+	mux := newHealthMux(apiSrv, sandbox.Status{Mode: config.IsolationOff, Reason: "ISOLATION=off"}, nil)
 	public := newMux(apiSrv, auth.New(auth.Options{NoAuth: true}))
 	for _, p := range []string{"/healthz", "/readyz"} {
 		if code := get(t, public, http.MethodGet, p); code != http.StatusNotFound {

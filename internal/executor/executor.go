@@ -127,20 +127,9 @@ func (e *Executor) StartJob(job Job) (*Run, error) {
 	if job.ID == "" {
 		job.ID = e.nextID()
 	}
-	user := strings.ToLower(job.User)
-	e.mu.Lock()
-	if e.limits.MaxPerUser > 0 && user != "" && e.byUser[user] >= e.limits.MaxPerUser {
-		e.mu.Unlock()
-		return nil, ErrUserBusy
-	}
-	e.byUser[user]++ // reserved before starting, so concurrent requests cannot both pass
-	e.mu.Unlock()
-	release := func() {
-		e.mu.Lock()
-		if e.byUser[user]--; e.byUser[user] <= 0 {
-			delete(e.byUser, user)
-		}
-		e.mu.Unlock()
+	release, err := e.reserve(job.User)
+	if err != nil {
+		return nil, err
 	}
 
 	select {
@@ -161,6 +150,48 @@ func (e *Executor) StartJob(job Job) (*Run, error) {
 		res := r.Result()
 		logger().Info("run finished", "run", r.ID, "script", r.ScriptName,
 			"status", res.Status, "exit_code", res.ExitCode, "duration", res.Finished.Sub(res.Started).Round(time.Millisecond))
+	}()
+	return r, nil
+}
+
+// reserve takes one of user's run slots, before starting, so concurrent requests cannot both
+// pass the per-user limit. release gives it back.
+func (e *Executor) reserve(user string) (release func(), err error) {
+	user = strings.ToLower(user)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.limits.MaxPerUser > 0 && user != "" && e.byUser[user] >= e.limits.MaxPerUser {
+		return nil, ErrUserBusy
+	}
+	e.byUser[user]++
+	return func() {
+		e.mu.Lock()
+		if e.byUser[user]--; e.byUser[user] <= 0 {
+			delete(e.byUser, user)
+		}
+		e.mu.Unlock()
+	}, nil
+}
+
+// Adopt tracks a run whose process lives elsewhere (see NewRemote), so Get, Running, RunningFor,
+// Forget and Shutdown cover it. It applies the per-user limit, not MaxConcurrent: the executor
+// running it has its own. start is called with the user's slot reserved.
+func (e *Executor) Adopt(user string, start func() (*Run, error)) (*Run, error) {
+	release, err := e.reserve(user)
+	if err != nil {
+		return nil, err
+	}
+	r, err := start()
+	if err != nil {
+		release()
+		return nil, err
+	}
+	e.mu.Lock()
+	e.runs[r.ID] = r
+	e.mu.Unlock()
+	go func() {
+		<-r.done
+		release()
 	}()
 	return r, nil
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, type SecretsOverview } from '../../api'
-import { gapCount, isolationSummary, kubeGapCount, secretCell, secretColumns } from '../../lib/secrets'
+import { executorSummary, gapCount, isolationSummary, kubeGapCount, secretCell, secretColumns } from '../../lib/secrets'
 
 const data = ref<SecretsOverview | null>(null)
 const error = ref('')
@@ -39,6 +39,44 @@ defineExpose({ load })
       mounted secrets. Set with <code>ISOLATION</code>.
     </p>
     <p v-if="isolation" :class="['badge', `tone-${isolation.tone}`]" data-testid="isolation">{{ isolation.text }}</p>
+
+    <template v-if="data.executors.length">
+      <h2>Executors</h2>
+      <p class="muted">
+        These environments run on their own executors (<code>EXECUTORS</code>), which hold their secrets and kubeconfig; this server
+        never sees the values. Their secrets below are the names the executors report.
+      </p>
+      <div class="table-wrap">
+        <table data-testid="executors">
+          <thead>
+            <tr>
+              <th scope="col">Environment</th>
+              <th scope="col">State</th>
+              <th scope="col">Pods</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="x in data.executors" :key="x.environment">
+              <th scope="row">{{ x.environment }}</th>
+              <td>
+                <span :class="['badge', `tone-${executorSummary(x).tone}`]">{{ executorSummary(x).text }}</span>
+              </td>
+              <td>
+                <div v-for="p in x.pods" :key="p.pod" class="small">
+                  {{ p.pod }}
+                  <span class="muted">
+                    · {{ p.version }} · {{ p.busy }}/{{ p.capacity }} busy ·
+                    {{ p.isolation.active ? `Landlock ABI ${p.isolation.abi}` : 'not sandboxed' }} · since
+                    {{ new Date(p.connected).toLocaleString() }}
+                  </span>
+                </div>
+                <span v-if="!x.pods.length" class="muted">–</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
 
     <p v-if="!data.configured" class="alert">No secrets directory is configured (<code>SECRETS_DIR</code>).</p>
     <p v-if="data.unknown_dirs.length" class="alert" role="alert">

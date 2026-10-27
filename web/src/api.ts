@@ -177,6 +177,14 @@ export interface SecretsOverview {
   scripts: { name: string; secrets: string[]; missing: Record<string, string[]>; envless: boolean }[]
   kubernetes: KubernetesOverview
   isolation: Isolation
+  executors: ExecutorEnvironment[] // environments whose runs execute on their executors (EXECUTORS)
+}
+
+// An environment that runs on its executors, with the pods connected right now.
+export interface ExecutorEnvironment {
+  environment: string
+  pods: { pod: string; version: string; connected: string; busy: number; capacity: number; isolation: Isolation }[]
+  secrets: { name: string; environment: string; modified: string }[] // names reported by the first pod, never values
 }
 
 // How runs are separated from each other (Landlock sandbox per run).

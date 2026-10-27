@@ -223,6 +223,7 @@ All settings come from environment variables. Secrets are never read from files.
 | `ISOLATION_READ_PATHS`, `ISOLATION_WRITE_PATHS` | – | more absolute paths every sandboxed run may read, or write (shared by all runs), comma-separated |
 | `RUN_MAX_PROCS` | `0` | `RLIMIT_NPROC` of sandboxed runs (`0`: unchanged) |
 | `WORKSPACE_DIR` | – | per-user workspaces, see *Workspace per user* |
+| `EXECUTORS` | – | environments whose runs and dropdown helpers execute on their own executors (`runwarden executor`), as JSON `{"<environment>": "<hex SHA-256 of its executor token>"}`; their secrets and kubeconfig must not be mounted on the server (it refuses to start); without a connected executor their runs are refused |
 | `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
 | `HISTORY_MAX_AGE` | `90d` | remove finished runs and activity-log days older than this (`d` or Go durations; `0` keeps them) |
 | `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |

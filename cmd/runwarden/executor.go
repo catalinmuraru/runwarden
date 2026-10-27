@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -117,6 +118,45 @@ func executorMain(environment string) error {
 	shutdownCtx, cancelHealth := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelHealth()
 	return health.Shutdown(shutdownCtx)
+}
+
+// newHub accepts the executors of the environments in EXECUTORS, or returns nil when there are
+// none. An executor environment's secrets and kubeconfig must not be mounted on the server: they
+// belong in its executors only.
+func newHub(cfg config.App) (*remote.Hub, error) {
+	if len(cfg.ExecutorTokens) == 0 {
+		return nil, nil
+	}
+	var errs []error
+	for env := range cfg.ExecutorTokens {
+		for _, dir := range []string{cfg.SecretsDir, cfg.KubeDir} {
+			if _, err := os.Stat(filepath.Join(dir, env)); err == nil {
+				errs = append(errs, fmt.Errorf("environment %s runs on executors (EXECUTORS), but %s is mounted on the server: "+
+					"mount it in its executors only", env, filepath.Join(dir, env)))
+			}
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return remote.NewHub(remote.HubOptions{Tokens: cfg.ExecutorTokens, MaxOutputBytes: cfg.MaxOutputBytes})
+}
+
+// describeExecutors is one readiness line per executor environment: how many pods are connected.
+func describeExecutors(hub *remote.Hub) string {
+	if hub == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, env := range hub.Environments() {
+		n := len(hub.Executors(env))
+		state := "down"
+		if n > 0 {
+			state = "up"
+		}
+		fmt.Fprintf(&b, "executors %s: %s (%d connected)\n", env, state, n)
+	}
+	return b.String()
 }
 
 // newExecutorHealthMux: /readyz is ready while the executor is registered with the server.
