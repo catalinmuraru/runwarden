@@ -176,6 +176,16 @@ export interface SecretsOverview {
   unknown_dirs: string[] // directories that are no environment of the policy
   scripts: { name: string; secrets: string[]; missing: Record<string, string[]>; envless: boolean }[]
   kubernetes: KubernetesOverview
+  isolation: Isolation
+}
+
+// How runs are separated from each other (Landlock sandbox per run).
+export interface Isolation {
+  mode: 'auto' | 'required' | 'off' // ISOLATION
+  active: boolean // runs are sandboxed
+  abi: number // Landlock ABI; 0 when unavailable
+  signal_scoping: boolean // ABI >= 6: a run cannot signal other runs
+  reason?: string // why runs are not sandboxed
 }
 
 export interface KubernetesOverview {

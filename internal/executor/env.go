@@ -26,6 +26,10 @@ type EnvPolicy struct {
 	PrivateHome bool
 	// HomeSkeleton, if set, is copied into every private HOME (e.g. .gitconfig, .ssh/known_hosts).
 	HomeSkeleton string
+	// Workspace, if set, holds the per-user workspaces: a run gets RUNWARDEN_WORKSPACE=
+	// <Workspace>/<user> (created 0700; with a Sandbox only that user's runs can reach it) and
+	// RUNWARDEN_SHARED=<Workspace>/shared (read-only with a Sandbox).
+	Workspace string
 }
 
 func (p EnvPolicy) withDefaults() EnvPolicy {
@@ -90,7 +94,7 @@ func (p EnvPolicy) build(paramEnv, secrets, fixed map[string]string) (env []stri
 func deniedEnv(name string) bool {
 	switch name {
 	case "PATH", "HOME", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "PS4", "PROMPT_COMMAND", "RUNWARDEN_USER", "TMPDIR", "TERM",
-		"KUBECONFIG", "AZURE_CONFIG_DIR", "":
+		"KUBECONFIG", "AZURE_CONFIG_DIR", "RUNWARDEN_WORKSPACE", "RUNWARDEN_SHARED", "RUNWARDEN_SANDBOX", "":
 		return true
 	}
 	return strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "BASH_FUNC_")

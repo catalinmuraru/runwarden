@@ -117,7 +117,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout, Secrets: sec.Env, Kube: kc})
+	run, err := s.exec.Start(executor.Request{Script: sc, Values: values, User: user.Name, Timeout: sc.Timeout, Secrets: sec.Env, Kube: kc, Uploads: uploadDir})
 	switch {
 	case errors.Is(err, executor.ErrUserBusy):
 		refused("user already has a run in progress")

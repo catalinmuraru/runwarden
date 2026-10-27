@@ -86,6 +86,20 @@ runs:
   # ".ssh/known_hosts"). Empty: start with an empty HOME.
   homeSkeletonConfigMap: ""
 
+# Isolation between runs: every run is sandboxed with Landlock (Linux >= 5.13, no privileges
+# needed). It cannot read other runs' files or /proc/<pid>/environ, other users' workspaces,
+# Runwarden's data or the mounted secrets and kubeconfigs, and with Linux >= 6.12 it cannot
+# signal other runs. required: refuse to start without it; auto: run unsandboxed with a
+# warning; off: no sandbox.
+isolation:
+  mode: required
+  # More paths every run may read, or read and write (shared by all runs, e.g. /dev/shm).
+  readPaths: []
+  writePaths: []
+  # RLIMIT_NPROC for sandboxed runs (0 = unchanged). It counts every process of the pod's user,
+  # Runwarden included, so it is a guard against fork bombs, not a per-run quota.
+  maxProcs: 0
+
 # Helper scripts that fill dropdowns and defaults: concurrent calls per user and in total, and
 # how long their output is reused ("0" = not cached).
 valueScripts:
@@ -100,7 +114,7 @@ activity:
 
 # Secrets for scripts, per environment: each value is the name of a Kubernetes Secret (created
 # outside the chart, e.g. with External Secrets or sealed secrets) mounted read-only at
-# /etc/runwarden/secrets/<environment>, one file per key. A run receives only the secrets its
+# /runwarden/secrets/<environment>, one file per key. A run receives only the secrets its
 # runner config declares ("secrets": [...]), from the environment it runs in; keys of `common`
 # are used when the environment has no key of that name. Environment names must match the
 # environments of the access policy (Admin area > Environments).
@@ -111,7 +125,7 @@ secrets:
   #   production: runwarden-secrets-production
 
 # Kubernetes cluster per environment: each value is the name of a Kubernetes Secret holding a
-# kubeconfig under the key "config", mounted read-only at /etc/runwarden/kube/<environment>/config.
+# kubeconfig under the key "config", mounted read-only at /runwarden/kube/<environment>/config.
 # Runners with "kubernetes": true get the kubeconfig of the environment they run in, with its
 # context renamed to the environment name. The file is opaque to Runwarden: credentials its exec
 # plugin needs come from `secrets` of the same environment. Several environments may share a
@@ -153,7 +167,8 @@ history:
   maxRuns: 0
 
 # Persistent working space for scripts that keep files between runs (git clones, dumps).
-# Mounted at /var/lib/runwarden-work; scripts see the path as $RUNWARDEN_WORKSPACE.
+# Mounted at /var/lib/runwarden-work, one private directory per user: scripts see their own as
+# $RUNWARDEN_WORKSPACE (read-write) and <root>/shared as $RUNWARDEN_SHARED (read-only for runs).
 workspace:
   enabled: false
   size: 10Gi
@@ -165,7 +180,7 @@ workspace:
 
 runners:
   # Runner configs as file name → config object. Empty: use the configs baked into the image
-  # (/etc/runwarden/runners). When set, they replace the image's configs.
+  # (/runwarden/runners). When set, they replace the image's configs.
   configs: {}
 
 # Run history (DATA_DIR). Without persistence, history is lost when the pod restarts.

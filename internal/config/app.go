@@ -35,8 +35,13 @@ type App struct {
 	MaxRunsPerUser    int           // MAX_RUNS_PER_USER, default 1; 0 means no per-user limit
 	RunHome           string        // RUN_HOME: "per-run" (default) or "shared"
 	HomeSkeleton      string        // HOME_SKELETON: directory copied into every per-run HOME
-	SecretsDir        string        // SECRETS_DIR, default "/etc/runwarden/secrets"; <dir>/<environment>/<NAME>
-	KubeDir           string        // KUBE_DIR, default "/etc/runwarden/kube"; <dir>/<environment>/config
+	SecretsDir        string        // SECRETS_DIR, default "/runwarden/secrets"; <dir>/<environment>/<NAME>
+	KubeDir           string        // KUBE_DIR, default "/runwarden/kube"; <dir>/<environment>/config
+	WorkspaceDir      string        // WORKSPACE_DIR: per-user workspaces <dir>/<user> and <dir>/shared
+	Isolation         string        // ISOLATION: "auto" (default), "required" or "off"; Landlock per run
+	IsolationRead     []string      // ISOLATION_READ_PATHS: more paths every run may read
+	IsolationWrite    []string      // ISOLATION_WRITE_PATHS: more paths every run may write (shared by all runs)
+	RunMaxProcs       int           // RUN_MAX_PROCS: RLIMIT_NPROC of sandboxed runs; 0 (default) leaves it
 	ValuesMaxPerUser  int           // VALUES_MAX_PER_USER, default 2; concurrent dropdown helpers per user
 	ValuesMaxGlobal   int           // VALUES_MAX_GLOBAL, default 10
 	ValuesCacheTTL    time.Duration // VALUES_CACHE_TTL, default 60s; 0 disables the cache
@@ -71,6 +76,13 @@ var DefaultEnvironments = []EnvironmentSeed{
 const (
 	RunHomePerRun = "per-run"
 	RunHomeShared = "shared"
+)
+
+// Isolation modes (the values of package sandbox).
+const (
+	IsolationAuto     = "auto"
+	IsolationRequired = "required"
+	IsolationOff      = "off"
 )
 
 // Sign-in methods.
@@ -237,8 +249,25 @@ func LoadApp(getenv func(string) string) (App, error) {
 	if app.RunHome != RunHomePerRun && app.RunHome != RunHomeShared {
 		errs = append(errs, fmt.Errorf("RUN_HOME: unknown value %q (want per-run or shared)", app.RunHome))
 	}
-	app.SecretsDir = dir("SECRETS_DIR", "/etc/runwarden/secrets")
-	app.KubeDir = dir("KUBE_DIR", "/etc/runwarden/kube")
+	app.SecretsDir = dir("SECRETS_DIR", "/runwarden/secrets")
+	app.KubeDir = dir("KUBE_DIR", "/runwarden/kube")
+	if str("WORKSPACE_DIR", "") != "" {
+		app.WorkspaceDir = dir("WORKSPACE_DIR", "")
+	}
+	app.Isolation = strings.ToLower(str("ISOLATION", IsolationAuto))
+	if app.Isolation != IsolationAuto && app.Isolation != IsolationRequired && app.Isolation != IsolationOff {
+		errs = append(errs, fmt.Errorf("ISOLATION: unknown value %q (want auto, required or off)", app.Isolation))
+	}
+	for name, paths := range map[string]*[]string{"ISOLATION_READ_PATHS": &app.IsolationRead, "ISOLATION_WRITE_PATHS": &app.IsolationWrite} {
+		for _, p := range list(getenv(name)) {
+			if !filepath.IsAbs(p) {
+				errs = append(errs, fmt.Errorf("%s: %q is not an absolute path", name, p))
+				continue
+			}
+			*paths = append(*paths, filepath.Clean(p))
+		}
+	}
+	app.RunMaxProcs = count("RUN_MAX_PROCS", 0)
 	if raw := str("HOME_SKELETON", ""); raw != "" {
 		app.HomeSkeleton = dir("HOME_SKELETON", raw)
 		if info, err := os.Stat(app.HomeSkeleton); err != nil || !info.IsDir() {

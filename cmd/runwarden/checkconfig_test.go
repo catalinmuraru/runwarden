@@ -14,7 +14,8 @@ func TestCheckConfigExamples(t *testing.T) {
 	if code := checkConfig([]string{"examples/runners"}, &out); code != 0 {
 		t.Fatalf("exit code %d, output:\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "5 scripts, 1 warnings, 0 errors") || !strings.Contains(out.String(), "secrets DB_PASSWORD, API_TOKEN") {
+	if !strings.Contains(out.String(), "5 scripts, 2 warnings, 0 errors") || !strings.Contains(out.String(), "secrets DB_PASSWORD, API_TOKEN") ||
+		!strings.Contains(out.String(), `secure parameter "Encryption key" is passed as an argument`) {
 		t.Errorf("unexpected summary:\n%s", out.String())
 	}
 }

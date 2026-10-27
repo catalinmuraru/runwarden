@@ -155,8 +155,29 @@ go run ./cmd/runwarden check-config path/to/runners
   with `"kubernetes": true` get their cluster from Runwarden (see *Kubernetes clusters per
   environment*) instead of `az aks get-credentials`; files that must survive go to `$RUNWARDEN_WORKSPACE`. `HOME_SKELETON`
   is copied into every new HOME (e.g. `.gitconfig`, `.ssh/known_hosts`). `RUN_HOME=shared`
-  keeps one HOME for all runs, for scripts that are not migrated yet. All runs share one user ID,
-  so this separates paths, not processes.
+  keeps one HOME for all runs, for scripts that are not migrated yet. All runs share one user ID;
+  *Isolation between runs* below keeps them apart.
+- **Isolation between runs** (`ISOLATION`, default `auto`): on Linux with Landlock (kernel 5.13+),
+  each run and each dropdown helper is sandboxed without privileges. It may read the system
+  (`/usr`, `/etc`, `/proc`, ...), `BASE_DIR`, `ISOLATION_READ_PATHS` (add `file_dir` directories
+  of `server_file` parameters that lie elsewhere) and its own uploaded files, and write only its own
+  `HOME`/`TMPDIR`, its user's workspace and `ISOLATION_WRITE_PATHS`. It cannot read
+  `DATA_DIR` (history, sessions, policy), `SECRETS_DIR`, `KUBE_DIR`, another run's files or
+  another user's workspace, nor another run's `/proc/<pid>/environ` or memory; with kernel 6.12+
+  (Landlock ABI 6) it cannot signal other runs either. Still visible to other runs: their
+  command lines, so `check-config` warns about `secure` parameters passed as arguments (use
+  `"pass_as": "env_variable"`). Memory, CPU and process count are shared by all runs
+  (`RUN_MAX_PROCS` sets `RLIMIT_NPROC`, which counts all processes of the user ID: a guard, not
+  a quota). At startup Runwarden checks that no private directory lies below a path every run can
+  access and runs a sandboxed self-test in the run and workspace directories (Landlock does not
+  work on every filesystem, e.g. 9p). `auto` runs scripts unsandboxed with a warning in the log
+  when any of this fails, or when Runwarden runs as root; `required` refuses to start; `off`
+  disables the sandbox.
+- **Workspace per user** (`WORKSPACE_DIR`): a run gets `RUNWARDEN_WORKSPACE=<dir>/<user>`
+  (created on first use, `0700`), for files that must survive between runs, and
+  `RUNWARDEN_SHARED=<dir>/shared`, read-only for runs (team tools, filled by operators). Dropdown
+  helpers get only `RUNWARDEN_SHARED`. User names with characters other than letters, digits,
+  `.`, `-` and `_` get a hash suffix.
 - **One run per user** (`MAX_RUNS_PER_USER`, default 1, admins included): a second start answers
   `429` with the ID of the run in progress; other users are not affected.
 - Dropdown helper scripts run at most `VALUES_MAX_PER_USER` (2) at a time per user and
@@ -165,7 +186,8 @@ go run ./cmd/runwarden check-config path/to/runners
 - Environment: scripts never inherit Runwarden's environment. They get `PATH`, `HOME`, `LANG`,
   `TZ` (defaults `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
   `LANG=C.UTF-8`), every `RUNNER_ENV_<NAME>` variable as `<NAME>`, `EXECUTION_ID`,
-  `RUNWARDEN_USER` (who started the run), `TMPDIR`, `TERM` on a terminal, their parameter
+  `RUNWARDEN_USER` (who started the run), `TMPDIR`, `TERM` on a terminal,
+  `RUNWARDEN_WORKSPACE` and `RUNWARDEN_SHARED` with `WORKSPACE_DIR`, their parameter
   variables and the secrets they declare (see *Secrets*). Parameters cannot set `PATH`, `HOME`,
   `IFS`, `ENV`, `BASH_ENV`, `LD_*`, `RUNWARDEN_USER`, `TMPDIR`, `TERM`, a declared secret and
   similar variables.
@@ -195,8 +217,12 @@ All settings come from environment variables. Secrets are never read from files.
 | `MAX_UPLOAD_BYTES` | `100Mi` | maximum upload request size |
 | `ALLOWED_ORIGINS` | – | extra hosts allowed to open WebSockets, comma-separated (`ops.example.com,*.example.org`); the server's own host is always allowed |
 | `RUNNER_ENV_<NAME>` | – | passed to every script as `<NAME>`: for settings, **not secrets** (the server warns about names that look like secrets) |
-| `SECRETS_DIR` | `/etc/runwarden/secrets` | secrets per environment, see *Secrets* |
-| `KUBE_DIR` | `/etc/runwarden/kube` | kubeconfig per environment, see *Kubernetes clusters per environment* |
+| `SECRETS_DIR` | `/runwarden/secrets` | secrets per environment, see *Secrets*; not below `/etc` or another path runs can read |
+| `KUBE_DIR` | `/runwarden/kube` | kubeconfig per environment, see *Kubernetes clusters per environment* |
+| `ISOLATION` | `auto` | Landlock sandbox per run: `auto`, `required` or `off`, see *Isolation between runs* |
+| `ISOLATION_READ_PATHS`, `ISOLATION_WRITE_PATHS` | – | more absolute paths every sandboxed run may read, or write (shared by all runs), comma-separated |
+| `RUN_MAX_PROCS` | `0` | `RLIMIT_NPROC` of sandboxed runs (`0`: unchanged) |
+| `WORKSPACE_DIR` | – | per-user workspaces, see *Workspace per user* |
 | `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
 | `HISTORY_MAX_AGE` | `90d` | remove finished runs and activity-log days older than this (`d` or Go durations; `0` keeps them) |
 | `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |
@@ -499,9 +525,10 @@ different environments never share or overwrite a kube context.
   credentials), unusable files, and runners that miss a cluster somewhere; `check-config` warns
   about environment values without a kubeconfig when `KUBE_DIR` is set.
 - **Rotation**: the file is read at every start, so an updated Secret applies without a restart.
-- **Isolation**: this pins the cluster; it does not contain a misused script. All runs share one
-  user ID, so a script can read files meant for other environments; give each environment's
-  credentials only the rights its scripts need.
+- **Isolation**: this pins the cluster; it does not contain a misused script. With the sandbox
+  (*Isolation between runs*) a run reads only the copy in its own HOME, never `KUBE_DIR`;
+  without it all runs share one user ID and can read each other's files. Either way, give each
+  environment's credentials only the rights its scripts need.
 
 Migrating a script: drop `az aks get-credentials` (and the `az login` it needed), set
 `"kubernetes": true` in its runner config and use `kubectl` as is, or
@@ -581,7 +608,7 @@ Debian slim with `bash`, the Runwarden binary (UI included) and `tini` as PID 1.
 
 | Path | Purpose |
 |---|---|
-| `/etc/runwarden/runners` | runner configs (`RUNNERS_DIR`) |
+| `/runwarden/runners` | runner configs (`RUNNERS_DIR`), not readable by sandboxed runs |
 | `/opt/runwarden` | scripts; relative paths in configs resolve here (`BASE_DIR`) |
 | `/var/lib/runwarden` | run history (`DATA_DIR`) — mount a volume |
 | `/home/runwarden`, `/tmp` | writable scratch space when the root filesystem is read-only |
@@ -595,7 +622,7 @@ FROM ghcr.io/catalinmuraru/runwarden:0.1.0
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends curl jq && rm -rf /var/lib/apt/lists/*
 USER 10001:10001
-COPY runners/ /etc/runwarden/runners/
+COPY runners/ /runwarden/runners/
 COPY scripts/ /opt/runwarden/scripts/
 ```
 
@@ -632,7 +659,12 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
   the real client address; ship the pod log with Filebeat (see *Logs and audit trail*).
 - **Retention**: `history.maxAge` (default `90d`) and `history.maxRuns`.
 - **Workspace**: `workspace.enabled` adds a persistent volume at `/var/lib/runwarden-work`
-  (`$RUNWARDEN_WORKSPACE` in scripts) for flows that keep files between runs.
+  (`WORKSPACE_DIR`) for flows that keep files between runs: one private directory per user
+  (`$RUNWARDEN_WORKSPACE`) and `shared` (`$RUNWARDEN_SHARED`, read-only for runs).
+- **Isolation**: `isolation.mode` (default `required`: the pod does not start without a working
+  Landlock sandbox; `auto` falls back to unsandboxed runs with a warning), `isolation.readPaths`,
+  `isolation.writePaths` and `isolation.maxProcs` (see *Isolation between runs*). The Admin
+  area's **Secrets** tab and the readiness probe show the state.
 - **Probes** on a separate container port (`health`, 8081); the Service exposes only the web port.
 - **Per-run HOME**: `runs.home` (`per-run` / `shared`) and `runs.homeSkeletonConfigMap` (a
   ConfigMap copied into every HOME; use `items`/`path` for files in sub-directories such as
@@ -645,18 +677,37 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
   for your GitLab, `auth.gitlab.requiredGroup`, `auth.initialAdmin`. `[none]` must be confirmed with
   `auth.allowNoAuth: true`. (`auth.type` was replaced by `auth.methods`; the chart says so.)
 - **Secrets**: `secrets.common` and `secrets.environments` (environment → Secret name), mounted
-  read-only (0440) under `/etc/runwarden/secrets/`.
+  read-only (0440) under `/runwarden/secrets/`; kubeconfigs under `/runwarden/kube/`.
 - **Access**: `policy.environments`, `policy.unknownEnvironment` and `policy.maxExceptionDays`.
   The first devops user is made by the built-in administrator (`auth.initialAdmin`);
   `auth.adminUsers` and `auth.adminGroups` were removed (the chart fails with a hint).
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
   (e.g. an SSH key from a Secret).
 
+#### Upgrading to the run sandbox
+
+The chart turns on `isolation.mode: required` and moves its mounts out of `/etc`, because
+Landlock has no deny rules and every run may read `/etc`:
+
+- Runner configs, secrets, kubeconfigs and the HOME skeleton are now under `/runwarden/`
+  (`RUNNERS_DIR=/runwarden/runners`, `SECRETS_DIR=/runwarden/secrets`, `KUBE_DIR=/runwarden/kube`).
+  Images built on the base image must `COPY` their runner configs to `/runwarden/runners/`;
+  values that mount files under `/etc/runwarden/...` through `extraVolumeMounts` must move them.
+  Runwarden refuses to sandbox runs (and with `required`, to start) while `DATA_DIR`,
+  `SECRETS_DIR`, `KUBE_DIR` or `WORKSPACE_DIR` lies below a path every run can read.
+- The workspace is per user: `$RUNWARDEN_WORKSPACE` is `/var/lib/runwarden-work/<user>`. Move
+  files scripts still need into the users' directories, and team tools into
+  `/var/lib/runwarden-work/shared` (e.g. with `kubectl exec`); runs can only read `shared`.
+- Scripts may write only their HOME, `$TMPDIR` and their workspace: replace hard-coded `/tmp`
+  paths with `$TMPDIR`, or allow a path for all runs with `isolation.writePaths`.
+- A node kernel without Landlock (before 5.13, or with the LSM disabled) fails the start with
+  `ISOLATION=required: ...`; set `isolation.mode: auto` to run unsandboxed until it is upgraded.
+
 ### Local cluster
 
 `deploy/kind/test.sh` builds both images, installs the chart into a kind cluster and checks that
-scripts run, output streams, the security context is enforced and history survives a pod
-restart. `KEEP=1 deploy/kind/test.sh` leaves it running.
+scripts run, output streams, the security context is enforced, a sandboxed run cannot reach a
+concurrent run's files, environment or memory, and history survives a pod restart. `KEEP=1 deploy/kind/test.sh` leaves it running.
 
 ### Releases
 
@@ -674,8 +725,10 @@ Pushing a tag `vX.Y.Z` on `main` builds and publishes the multi-arch image
 - Script secrets are bound to environments and scripts: a run gets only the secrets its config
   declares, of the environment it may run in; they are masked in output, history and audit, which
   record only their names.
-- Runs get the kubeconfig of their environment only, chosen by Runwarden; this prevents mistakes,
-  not a misused script reading another environment's files (all runs share one user ID).
+- Runs get the kubeconfig of their environment only, chosen by Runwarden.
+- With Landlock (`ISOLATION`), runs cannot read Runwarden's data, secrets or kubeconfigs, other
+  runs' files, environment or memory, or other users' workspaces; with kernel 6.12+ they cannot
+  signal other runs. They still see other runs' command lines and share memory and CPU.
 - The container runs as non-root with a read-only root filesystem and no capabilities.
 
 ## Tech stack
@@ -748,7 +801,8 @@ Dockerfile         base image
 ## Health checks
 
 `GET /healthz` (liveness) and `GET /readyz` (readiness) return `200 ok` on `HEALTH_ADDR`
-(`:8081`), a separate listener that the Helm chart does not expose through the Service or
+(`:8081`); the readiness body adds one line on the run sandbox (`isolation: sandboxed (Landlock
+ABI 7, signals scoped)`, or why runs are not sandboxed). The health port is a separate listener that the Helm chart does not expose through the Service or
 ingress. On the web port they answer `404`: without a session, the web port offers only sign-in
 and the UI shell.
 

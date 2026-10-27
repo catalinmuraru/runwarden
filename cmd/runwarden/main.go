@@ -27,6 +27,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/kube"
 	"github.com/catalinmuraru/runwarden/internal/logging"
 	"github.com/catalinmuraru/runwarden/internal/policy"
+	"github.com/catalinmuraru/runwarden/internal/sandbox"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
 	"github.com/catalinmuraru/runwarden/internal/settings"
 	"github.com/catalinmuraru/runwarden/internal/web"
@@ -38,6 +39,8 @@ var version = "dev"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "sandbox-exec": // hidden: the executor starts sandboxed runs through it
+			os.Exit(sandbox.Main(os.Args[2:]))
 		case "check-config":
 			os.Exit(checkConfig(os.Args[2:], os.Stdout))
 		case "version", "--version":
@@ -98,7 +101,15 @@ func run() error {
 		TempRoot:     tempRoot,
 		PrivateHome:  cfg.RunHome == config.RunHomePerRun,
 		HomeSkeleton: cfg.HomeSkeleton,
+		Workspace:    cfg.WorkspaceDir,
 	})
+	sb, isolation, err := newSandbox(cfg, tempRoot)
+	if err != nil {
+		return fmt.Errorf("configuration: %w", err)
+	}
+	if sb != nil {
+		ex.WithSandbox(sb)
+	}
 	access, err := newAccess(cfg)
 	if err != nil {
 		return err
@@ -115,6 +126,7 @@ func run() error {
 		return fmt.Errorf("settings: %w", err)
 	}
 	opts := api.Options{
+		Isolation:      isolation,
 		BaseDir:        cfg.BaseDir,
 		DataDir:        cfg.DataDir,
 		MaxUploadBytes: cfg.MaxUploadBytes,
@@ -156,7 +168,7 @@ func run() error {
 	// Probes get their own listener, which the Service and ingress do not expose.
 	health := &http.Server{
 		Addr:              cfg.HealthAddr,
-		Handler:           newHealthMux(apiSrv),
+		Handler:           newHealthMux(apiSrv, isolation),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errc := make(chan error, 2)
@@ -411,16 +423,18 @@ func newMux(apiSrv *api.Server, authH *auth.Handler) *http.ServeMux {
 	return mux
 }
 
-// newHealthMux serves the liveness and readiness probes.
-func newHealthMux(apiSrv *api.Server) *http.ServeMux {
+// newHealthMux serves the liveness and readiness probes. The readiness body also says how runs
+// are isolated (ISOLATION=required never gets this far without a sandbox).
+func newHealthMux(apiSrv *api.Server, isolation sandbox.Status) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if !apiSrv.Ready() {
 			http.Error(w, "runner configs not loaded", http.StatusServiceUnavailable)
 			return
 		}
-		ok(w, r)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok\nisolation: " + describeIsolation(isolation) + "\n"))
 	})
 	return mux
 }

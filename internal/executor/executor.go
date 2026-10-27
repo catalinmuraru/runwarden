@@ -56,6 +56,8 @@ type Request struct {
 	Secrets map[string]string
 	// Kube pins the run to its environment's cluster; nil: no kubeconfig is written.
 	Kube *Kube
+	// Uploads is the directory with the run's uploaded files, which a sandboxed run may read.
+	Uploads string
 }
 
 // Kube is the kubeconfig of a run, written into its private HOME as KUBECONFIG, with the
@@ -83,6 +85,7 @@ type Executor struct {
 	byUser map[string]int // runs in progress (or starting) per lower-case user name
 
 	helperSeq atomic.Uint64 // names helper directories without using run IDs
+	sandbox   *Sandbox      // nil: runs are not sandboxed
 }
 
 // New returns an Executor with the given limits and environment policy.
@@ -179,15 +182,23 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 		}
 		return nil, err
 	}
+	ws, err := e.env.prepareWorkspace(req.User, false)
+	if err != nil {
+		return fail(err)
+	}
+	for k, v := range ws.vars {
+		fixed[k] = v
+	}
 	env, refused := e.env.build(inv.Env, req.Secrets, fixed)
 	for _, name := range refused {
 		logger().Warn("env variable refused for parameter", "script", s.Name, "variable", name)
 	}
 
-	args := append(append([]string(nil), s.Command[1:]...), inv.Args...)
+	name, args, env := e.wrap(s.Command[0], append(slices.Clone(s.Command[1:]), inv.Args...), env,
+		[]string{ws.shared, req.Uploads}, []string{tmpDir, ws.own})
 	// No context: a canceled context would kill only the main process, while runs end through
 	// Stop/Kill/timeout, which signal the whole process group.
-	cmd := exec.Command(s.Command[0], args...) //nolint:gosec,noctx // argv from a validated config, no shell
+	cmd := exec.Command(name, args...) //nolint:gosec,noctx // program from a validated config, no shell
 	cmd.Dir = s.WorkingDirectory
 	cmd.Env = env
 

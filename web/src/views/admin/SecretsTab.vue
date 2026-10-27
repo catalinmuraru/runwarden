@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, type SecretsOverview } from '../../api'
-import { gapCount, kubeGapCount, secretCell, secretColumns } from '../../lib/secrets'
+import { gapCount, isolationSummary, kubeGapCount, secretCell, secretColumns } from '../../lib/secrets'
 
 const data = ref<SecretsOverview | null>(null)
 const error = ref('')
 
 const columns = computed(() => (data.value ? secretColumns(data.value) : []))
 const rows = computed(() => (data.value?.scripts ?? []).map((s) => ({ ...s, cells: columns.value.map((c) => ({ column: c, ...secretCell(s, c) })) })))
+const isolation = computed(() => (data.value ? isolationSummary(data.value.isolation) : null))
 const dirs = computed(() => Object.entries(data.value?.available ?? {}).sort(([a], [b]) => a.localeCompare(b)))
 
 async function load() {
@@ -32,6 +33,13 @@ defineExpose({ load })
   <p v-if="error" class="alert" role="alert">{{ error }}</p>
   <p v-else-if="!data" class="muted">Loading…</p>
   <template v-else>
+    <h2>Isolation between runs</h2>
+    <p class="muted">
+      Each run is sandboxed: it cannot read other runs' files or environment, other users' workspaces, Runwarden's data or the
+      mounted secrets. Set with <code>ISOLATION</code>.
+    </p>
+    <p v-if="isolation" :class="['badge', `tone-${isolation.tone}`]" data-testid="isolation">{{ isolation.text }}</p>
+
     <p v-if="!data.configured" class="alert">No secrets directory is configured (<code>SECRETS_DIR</code>).</p>
     <p v-if="data.unknown_dirs.length" class="alert" role="alert">
       Secrets for {{ data.unknown_dirs.join(', ') }}: no environment has that name, so no run receives them. Rename the environment or

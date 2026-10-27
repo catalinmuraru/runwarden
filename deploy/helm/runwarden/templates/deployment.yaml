@@ -95,27 +95,27 @@ spec:
             {{- end }}
             {{- if .Values.runners.configs }}
             - name: runners
-              mountPath: /etc/runwarden/runners
+              mountPath: /runwarden/runners
               readOnly: true
             {{- end }}
             {{- if .Values.runs.homeSkeletonConfigMap }}
             - name: home-skeleton
-              mountPath: /etc/runwarden/home-skeleton
+              mountPath: /runwarden/home-skeleton
               readOnly: true
             {{- end }}
             {{- with .Values.secrets.common }}
             - name: secrets-common
-              mountPath: /etc/runwarden/secrets/common
+              mountPath: /runwarden/secrets/common
               readOnly: true
             {{- end }}
             {{- range $i, $env := keys .Values.secrets.environments | sortAlpha }}
             - name: secrets-{{ $i }}
-              mountPath: /etc/runwarden/secrets/{{ $env }}
+              mountPath: /runwarden/secrets/{{ $env }}
               readOnly: true
             {{- end }}
             {{- range $i, $env := keys .Values.kube.environments | sortAlpha }}
             - name: kube-{{ $i }}
-              mountPath: /etc/runwarden/kube/{{ $env }}
+              mountPath: /runwarden/kube/{{ $env }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}

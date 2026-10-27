@@ -15,6 +15,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/activity"
 	"github.com/catalinmuraru/runwarden/internal/audit"
 	"github.com/catalinmuraru/runwarden/internal/executor"
+	"github.com/catalinmuraru/runwarden/internal/sandbox"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
 )
 
@@ -50,7 +51,7 @@ func TestRunSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := secretsDir(t)
-	alice := setup(t, executor.Limits{}, Options{Activity: acts, Secrets: secrets.Store{Dir: dir}}) // ops: runs Copy everywhere
+	alice := setup(t, executor.Limits{}, Options{Activity: acts, Secrets: secrets.Store{Dir: dir}, Isolation: sandbox.Status{Mode: "auto", Active: true, ABI: 7, SignalScoping: true}}) // ops: runs Copy everywhere
 	root := alice.as("root", "")
 
 	// Copy production → development: the target's secret, the source's with SOURCE_, common ones,
@@ -133,6 +134,7 @@ func TestRunSecrets(t *testing.T) {
 	var page struct {
 		Available map[string][]string `json:"available"`
 		Scripts   []secretsScript     `json:"scripts"`
+		Isolation sandbox.Status      `json:"isolation"`
 	}
 	if err := json.Unmarshal(body, &page); err != nil {
 		t.Fatal(err)
@@ -140,5 +142,8 @@ func TestRunSecrets(t *testing.T) {
 	if len(page.Scripts) != 1 || strings.Join(page.Scripts[0].Missing["production"], ",") != "DB_PASSWORD" ||
 		len(page.Scripts[0].Missing["development"]) != 0 || strings.Join(page.Available[secrets.Common], ",") != "PRIVATE_TOKEN" {
 		t.Errorf("admin secrets page = %+v", page)
+	}
+	if !page.Isolation.Active || page.Isolation.ABI != 7 || !page.Isolation.SignalScoping {
+		t.Errorf("admin secrets isolation = %+v", page.Isolation)
 	}
 }
