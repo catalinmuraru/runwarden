@@ -165,6 +165,25 @@ func TestSandboxedTerminal(t *testing.T) {
 	}
 }
 
+func TestSandboxedUploads(t *testing.T) {
+	needLandlock(t)
+	base, env := isolationSetup(t)
+	sb, _ := testSandbox(t)
+	uploads := filepath.Join(base, "data", "uploads", "abc")
+	if err := os.MkdirAll(uploads, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(uploads, "0_in.txt")
+	if err := os.WriteFile(file, []byte("uploaded content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &config.Script{Name: "cat", Command: []string{"/bin/cat", file}, WorkingDirectory: t.TempDir()}
+	r := mustStart(t, New(Limits{}, env).WithSandbox(sb), Request{Script: s, User: "alice", Uploads: uploads})
+	if res := waitDone(t, r); res.ExitCode != 0 || outputOf(r) != "uploaded content" {
+		t.Errorf("exit %d, output %q", res.ExitCode, outputOf(r))
+	}
+}
+
 func TestSandboxedHelper(t *testing.T) {
 	needLandlock(t)
 	base, env := isolationSetup(t)

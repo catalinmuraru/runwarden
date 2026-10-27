@@ -56,6 +56,8 @@ type Request struct {
 	Secrets map[string]string
 	// Kube pins the run to its environment's cluster; nil: no kubeconfig is written.
 	Kube *Kube
+	// Uploads is the directory with the run's uploaded files, which a sandboxed run may read.
+	Uploads string
 }
 
 // Kube is the kubeconfig of a run, written into its private HOME as KUBECONFIG, with the
@@ -193,7 +195,7 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 	}
 
 	name, args, env := e.wrap(s.Command[0], append(slices.Clone(s.Command[1:]), inv.Args...), env,
-		[]string{ws.shared}, []string{tmpDir, ws.own})
+		[]string{ws.shared, req.Uploads}, []string{tmpDir, ws.own})
 	// No context: a canceled context would kill only the main process, while runs end through
 	// Stop/Kill/timeout, which signal the whole process group.
 	cmd := exec.Command(name, args...) //nolint:gosec,noctx // program from a validated config, no shell

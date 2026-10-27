@@ -159,7 +159,8 @@ go run ./cmd/runwarden check-config path/to/runners
   *Isolation between runs* below keeps them apart.
 - **Isolation between runs** (`ISOLATION`, default `auto`): on Linux with Landlock (kernel 5.13+),
   each run and each dropdown helper is sandboxed without privileges. It may read the system
-  (`/usr`, `/etc`, `/proc`, ...), `BASE_DIR` and `ISOLATION_READ_PATHS`, and write only its own
+  (`/usr`, `/etc`, `/proc`, ...), `BASE_DIR`, `ISOLATION_READ_PATHS` (add `file_dir` directories
+  of `server_file` parameters that lie elsewhere) and its own uploaded files, and write only its own
   `HOME`/`TMPDIR`, its user's workspace and `ISOLATION_WRITE_PATHS`. It cannot read
   `DATA_DIR` (history, sessions, policy), `SECRETS_DIR`, `KUBE_DIR`, another run's files or
   another user's workspace, nor another run's `/proc/<pid>/environ` or memory; with kernel 6.12+
