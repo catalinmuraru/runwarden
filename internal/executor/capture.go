@@ -48,8 +48,8 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string, se
 		vars[k] = v
 	}
 	env, _ := e.env.build(nil, secrets, vars)
-	argv, env := e.wrap(command, env, []string{ws.shared}, []string{dir0})
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv from config, no shell
+	name, args, env := e.wrap(command[0], command[1:], env, []string{ws.shared}, []string{dir0})
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // argv from config, no shell
 	cmd.Dir = dir
 	cmd.Env = env
 	if err := prepare(cmd); err != nil {

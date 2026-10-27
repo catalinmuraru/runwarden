@@ -28,20 +28,21 @@ func (e *Executor) WithSandbox(s *Sandbox) *Executor {
 	return e
 }
 
-// wrap returns the argv and environment that start argv inside the sandbox with the extra
-// read and write paths, or both unchanged when there is no sandbox. The trampoline keeps the
-// PID, so process groups, the terminal and stop/kill work as without it.
-func (e *Executor) wrap(argv, env, read, write []string) ([]string, []string) {
+// wrap returns the program, arguments and environment that start name with args inside the
+// sandbox with the extra read and write paths, or all unchanged when there is no sandbox. The
+// program stays apart from the arguments so it never depends on user input. The trampoline
+// keeps the PID, so process groups, the terminal and stop/kill work as without it.
+func (e *Executor) wrap(name string, args, env, read, write []string) (string, []string, []string) {
 	s := e.sandbox
 	if s == nil {
-		return argv, env
+		return name, args, env
 	}
 	p := sandbox.Policy{
 		Read:     append(slices.Clone(s.Read), nonEmpty(read)...),
 		Write:    append(slices.Clone(s.Write), nonEmpty(write)...),
 		MaxProcs: s.MaxProcs,
 	}
-	return append([]string{s.Exe, "sandbox-exec", "--"}, argv...), append(env, sandbox.EnvVar+"="+p.Encode())
+	return s.Exe, append([]string{"sandbox-exec", "--", name}, args...), append(env, sandbox.EnvVar+"="+p.Encode())
 }
 
 // selfTestScript must read $1, write into $2 (a new directory below $3) and fail to list $3.

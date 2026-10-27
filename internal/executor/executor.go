@@ -192,11 +192,11 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 		logger().Warn("env variable refused for parameter", "script", s.Name, "variable", name)
 	}
 
-	argv := append(slices.Clone(s.Command), inv.Args...)
-	argv, env = e.wrap(argv, env, []string{ws.shared}, []string{tmpDir, ws.own})
+	name, args, env := e.wrap(s.Command[0], append(slices.Clone(s.Command[1:]), inv.Args...), env,
+		[]string{ws.shared}, []string{tmpDir, ws.own})
 	// No context: a canceled context would kill only the main process, while runs end through
 	// Stop/Kill/timeout, which signal the whole process group.
-	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec,noctx // argv from a validated config, no shell
+	cmd := exec.Command(name, args...) //nolint:gosec,noctx // program from a validated config, no shell
 	cmd.Dir = s.WorkingDirectory
 	cmd.Env = env
 
