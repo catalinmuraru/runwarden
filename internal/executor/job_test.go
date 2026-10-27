@@ -44,6 +44,15 @@ func TestJobFromRequest(t *testing.T) {
 	}
 }
 
+// A job carries the server's default timeout, so an executor with other limits still applies it.
+func TestJobResolvesTimeout(t *testing.T) {
+	s := testScript(t, "args.sh")
+	e := New(Limits{Timeout: 4 * time.Hour}, EnvPolicy{})
+	if job := e.Job(Request{Script: s, User: "alice"}); job.Timeout != 4*time.Hour {
+		t.Errorf("timeout %v, want the server default 4h", job.Timeout)
+	}
+}
+
 func TestStartJobErrors(t *testing.T) {
 	e := New(Limits{}, EnvPolicy{})
 	if _, err := e.StartJob(Job{}); err == nil {

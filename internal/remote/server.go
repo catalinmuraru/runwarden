@@ -371,7 +371,9 @@ func (c *Conn) Start(ctx context.Context, job executor.Job, opts StartOptions) (
 		delete(c.runs, job.ID)
 		c.mu.Unlock()
 		if reply.Type == "" { // no answer (canceled): the run may have started anyway
-			_ = c.send(context.Background(), Message{Type: typeKill, ID: job.ID})
+			// In the background: a wedged connection must not hold the request for writeTimeout.
+			kctx := context.WithoutCancel(ctx)
+			go func() { _ = c.send(kctx, Message{Type: typeKill, ID: job.ID}) }()
 		}
 		return nil, nil, err
 	}

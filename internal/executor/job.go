@@ -54,7 +54,7 @@ func (e *Executor) Job(req Request) Job {
 		Redact:     redact,
 		Dir:        s.WorkingDirectory,
 		Terminal:   s.RequiresTerminal,
-		Timeout:    req.Timeout,
+		Timeout:    e.Timeout(req.Timeout), // resolved here, so a remote executor applies the server's limits
 		Secrets:    req.Secrets,
 		Kube:       req.Kube,
 		Uploads:    req.Uploads,

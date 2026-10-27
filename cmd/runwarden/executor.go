@@ -90,6 +90,9 @@ func executorMain(environment string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// The connection outlives the signal: runs are stopped first, so their end reaches the server.
+	agentCtx, cancelAgent := context.WithCancel(context.Background())
+	defer cancelAgent()
 	health := &http.Server{
 		Addr:              cfg.HealthAddr,
 		Handler:           newExecutorHealthMux(agent),
@@ -97,7 +100,7 @@ func executorMain(environment string) error {
 	}
 	errc := make(chan error, 2)
 	go func() { errc <- health.ListenAndServe() }()
-	go func() { errc <- agent.Run(ctx) }()
+	go func() { errc <- agent.Run(agentCtx) }()
 	slog.Info("executor starting", "environment", x.Environment, "pod", x.Pod, "server", x.ServerURL, "health", cfg.HealthAddr)
 
 	select {
@@ -112,9 +115,10 @@ func executorMain(environment string) error {
 	slog.Info("executor shutting down: stopping running scripts")
 	runsCtx, cancel := context.WithTimeout(context.Background(), cfg.KillGrace+5*time.Second)
 	defer cancel()
-	if err := ex.Shutdown(runsCtx); err != nil {
+	if err := agent.Shutdown(runsCtx); err != nil {
 		slog.Warn("some runs had to be killed", "err", err)
 	}
+	cancelAgent()
 	shutdownCtx, cancelHealth := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelHealth()
 	return health.Shutdown(shutdownCtx)

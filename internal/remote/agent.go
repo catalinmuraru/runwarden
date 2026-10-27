@@ -50,6 +50,10 @@ type Agent struct {
 	HTTPClient  *http.Client
 
 	connected atomic.Bool
+
+	mu       sync.Mutex
+	draining bool
+	active   int // runs started and not yet reported to the server
 }
 
 // Connected reports whether the agent is registered with the server right now.
@@ -78,6 +82,49 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		backoff = min(backoff*2, maxBackoff)
 	}
+}
+
+// Shutdown stops the runs in progress while the connection stays up, so their output and
+// exit still reach the server, and refuses new ones. Cancel Run's context afterwards. Runs
+// that do not end before ctx are killed when the connection closes.
+func (a *Agent) Shutdown(ctx context.Context) error {
+	a.mu.Lock()
+	a.draining = true
+	a.mu.Unlock()
+	err := a.Exec.Shutdown(ctx)
+	t := time.NewTicker(50 * time.Millisecond)
+	defer t.Stop()
+	for {
+		a.mu.Lock()
+		active := a.active
+		a.mu.Unlock()
+		if active == 0 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
+// begin counts a run about to start, or reports false when the executor is shutting down.
+func (a *Agent) begin() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.draining {
+		return false
+	}
+	a.active++
+	return true
+}
+
+// end counts a run whose result has been sent, or that never started.
+func (a *Agent) end() {
+	a.mu.Lock()
+	a.active--
+	a.mu.Unlock()
 }
 
 func (a *Agent) hello() Hello {
@@ -257,6 +304,16 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 		return
 	}
 	a := s.a
+	if !a.begin() {
+		fail(errors.New("the executor is shutting down"))
+		return
+	}
+	started := false
+	defer func() {
+		if !started {
+			a.end()
+		}
+	}()
 	env := []string{a.Environment}
 	if len(st.Secrets) > 0 {
 		res, err := a.Secrets.Resolve(st.Secrets, env, nil)
@@ -266,7 +323,7 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 		}
 		job.Secrets = res.Env
 	}
-	var started Started
+	var info Started
 	if st.Kubernetes {
 		res, err := a.Kube.Resolve(env, nil)
 		if err != nil {
@@ -274,7 +331,7 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 			return
 		}
 		job.Kube = &executor.Kube{Config: res.Kubeconfig, Env: res.Env}
-		started.Clusters = res.Clusters
+		info.Clusters = res.Clusters
 	}
 	uploads, err := a.writeFiles(id, st.Files, &job)
 	if err != nil {
@@ -296,9 +353,11 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 	s.runs[id] = r
 	s.mu.Unlock()
 	// Sent before any output: the server knows the run once this arrives.
-	_ = s.send(ctx, Message{Type: typeStarted, ID: id, Started: &started})
+	_ = s.send(ctx, Message{Type: typeStarted, ID: id, Started: &info})
+	started = true
 	go func() {
 		s.stream(ctx, r)
+		a.end()
 		<-r.Done()
 		s.mu.Lock()
 		delete(s.runs, id)

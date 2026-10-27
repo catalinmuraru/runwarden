@@ -1,8 +1,14 @@
+{{- $slugs := dict }}
 {{- range $env, $x := .Values.executors }}
 {{- $x = $x | default dict }}
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$" $env) }}
 {{- fail (printf "executors: invalid environment name %q" $env) }}
 {{- end }}
+{{- $slug := include "runwarden.envSlug" $env }}
+{{- if hasKey $slugs $slug }}
+{{- fail (printf "executors: environments %q and %q get the same resource name (%s)" (get $slugs $slug) $env $slug) }}
+{{- end }}
+{{- $_ := set $slugs $slug $env }}
 {{- $ctx := dict "root" $ "env" $env }}
 {{- $name := include "runwarden.executorName" $ctx }}
 {{- $token := $x.token | default dict }}
@@ -66,7 +72,7 @@ metadata:
     {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
 spec:
   replicas: {{ hasKey $x "replicas" | ternary $x.replicas 1 }}
-  # A replica that stops ends its runs, so a new one is connected before an old one goes.
+  # A replica that stops stops its runs, so a new one is connected before an old one goes.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -82,10 +88,12 @@ spec:
         {{- with $x.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with $x.podAnnotations }}
       annotations:
+        # A new token rolls the pods, which otherwise keep the old one and are refused.
+        checksum/token: {{ include "runwarden.executorTokenSha256" $ctx }}
+        {{- with $x.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       serviceAccountName: {{ $saName }}
       automountServiceAccountToken: {{ $sa.automountToken | default false }}

@@ -257,6 +257,28 @@ func TestDisconnectFailsRuns(t *testing.T) {
 	eventually(t, "runs killed on the executor", func() bool { return len(p.agent.Exec.Running()) == 0 })
 }
 
+func TestShutdownStopsRunsGracefully(t *testing.T) {
+	p := startPair(t, executor.Limits{})
+	conn := p.hub.Pick("prod")
+	r, _, err := conn.Start(context.Background(), job("drain-1", script(t, "wait.sh")), StartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, r, "started")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.agent.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The pod's SIGTERM reaches the server as a stopped run, not a lost connection.
+	if res := wait(t, r); res.Status != executor.StatusStopped || !strings.Contains(output(r), "got TERM") {
+		t.Errorf("result %+v:\n%s", res, output(r))
+	}
+	if _, _, err := conn.Start(context.Background(), job("drain-2", script(t, "wait.sh")), StartOptions{}); err == nil || !strings.Contains(err.Error(), "shutting down") {
+		t.Errorf("start while shutting down: %v", err)
+	}
+}
+
 func TestHelperCapture(t *testing.T) {
 	p := startPair(t, executor.Limits{})
 	conn := p.hub.Pick("prod")
