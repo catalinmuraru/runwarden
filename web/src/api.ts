@@ -228,6 +228,12 @@ export interface ActivityFilter {
   limit?: number
 }
 
+export type Theme = 'system' | 'light' | 'dark'
+
+export interface UiSettings {
+  theme: Theme
+}
+
 export interface FileEntry {
   name: string
   dir: boolean
@@ -361,6 +367,9 @@ export const api = {
     request<{ summary: ImportSummary; warnings: string[] }>('POST', '/api/admin/policy/import?dry_run=true', new RawBody(yaml, 'application/yaml')),
   importPolicy: (revision: number, yaml: string) =>
     request<PolicyView>('POST', `/api/admin/policy/import${query({ revision: String(revision) })}`, new RawBody(yaml, 'application/yaml')),
+
+  getUiSettings: () => request<UiSettings>('GET', '/api/settings/ui'),
+  putUiSettings: (s: UiSettings) => request<UiSettings>('PUT', '/api/admin/settings/ui', s),
 
   socketURL: (id: string, offset: number) => {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
