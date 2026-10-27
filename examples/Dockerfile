@@ -13,7 +13,7 @@ FROM ${BASE}
 
 # Runner configs are read from RUNNERS_DIR; relative paths inside them resolve against BASE_DIR
 # (/opt/runwarden), so the examples keep their "examples/..." paths.
-COPY examples/runners/ /etc/runwarden/runners/
+COPY examples/runners/ /runwarden/runners/
 COPY examples/runners/ /opt/runwarden/examples/runners/
 COPY examples/scripts/ /opt/runwarden/examples/scripts/
 COPY examples/archives/ /opt/runwarden/examples/archives/

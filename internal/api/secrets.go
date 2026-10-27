@@ -140,6 +140,7 @@ func (s *Server) adminSecrets(w http.ResponseWriter, _ *http.Request) {
 		"unknown_dirs": nonNil(unknown),
 		"scripts":      out,
 		"kubernetes":   kc,
+		"isolation":    s.opts.Isolation,
 	})
 }
 

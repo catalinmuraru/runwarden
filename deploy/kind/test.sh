@@ -47,11 +47,56 @@ if [ -n "${RUNWARDEN_KUBE_SOURCE_CONTEXT:-}" ]; then
   echo "source marker=$(kubectl --context "$RUNWARDEN_KUBE_SOURCE_CONTEXT" get configmap marker -o jsonpath='{.data.env}')"
 fi
 EOF
+# Isolation between runs: a victim holding a secret and private files, and an attacker.
+cat > "$E2E/isolation_victim.json" <<'EOF'
+{ "name": "Isolation Victim", "group": "Test", "script_path": "/opt/runwarden/e2e/isolation_victim.sh",
+  "working_directory": ".", "requires_terminal": false, "tags": ["devops"], "secrets": ["DB_PASSWORD"],
+  "environment_parameters": { "Environment": "target" },
+  "parameters": [ { "name": "Environment", "type": "list", "required": true, "values": ["production"] } ] }
+EOF
+cat > "$E2E/isolation_victim.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "victim-home" > "$HOME/token"
+echo "victim-notes" > "$RUNWARDEN_WORKSPACE/notes"
+echo "ready pid=$$ home=$HOME"
+exec sleep 20
+EOF
+cat > "$E2E/isolation_attack.json" <<'EOF'
+{ "name": "Isolation Attack", "group": "Test", "script_path": "/opt/runwarden/e2e/isolation_attack.sh",
+  "working_directory": ".", "requires_terminal": false, "tags": ["devops"],
+  "parameters": [
+    { "name": "Pid", "type": "int", "required": true, "env_var": "VICTIM_PID" },
+    { "name": "Home", "type": "text", "required": true, "env_var": "VICTIM_HOME" } ] }
+EOF
+cat > "$E2E/isolation_attack.sh" <<'EOF'
+#!/usr/bin/env bash
+# Prints attack:<name>=open|blocked for what a run must not do, and what it must still do.
+try() {
+  local name=$1
+  shift
+  if "$@" >/dev/null 2>&1; then echo "attack:$name=open"; else echo "attack:$name=blocked"; fi
+}
+try other-home cat "$VICTIM_HOME/token"
+try other-environ cat "/proc/$VICTIM_PID/environ"
+try other-mem head -c1 "/proc/$VICTIM_PID/mem"
+try other-signal kill -0 "$VICTIM_PID"
+try data-dir ls /var/lib/runwarden
+try secrets ls /runwarden/secrets/production
+try kubeconfigs ls /runwarden/kube
+try runner-configs ls /runwarden/runners
+try workspace-root ls /var/lib/runwarden-work
+try other-workspace cat /var/lib/runwarden-work/mallory/notes
+try shared-write touch /var/lib/runwarden-work/shared/evil
+try own-home sh -c 'echo x > "$HOME/f" && cat "$HOME/f"'
+try own-workspace sh -c 'echo x > "$RUNWARDEN_WORKSPACE/f" && cat "$RUNWARDEN_WORKSPACE/f"'
+try system cat /etc/os-release
+echo "attacks done"
+EOF
 cat > "$E2E/Dockerfile" <<'EOF'
 FROM runwarden-examples:dev
 COPY --chmod=0755 kubectl /usr/local/bin/kubectl
-COPY kube_whoami.json /etc/runwarden/runners/
-COPY --chmod=0755 kube_whoami.sh /opt/runwarden/e2e/
+COPY kube_whoami.json isolation_victim.json isolation_attack.json /runwarden/runners/
+COPY --chmod=0755 kube_whoami.sh isolation_victim.sh isolation_attack.sh /opt/runwarden/e2e/
 EOF
 docker build -q -t runwarden-e2e:dev "$E2E" >/dev/null
 rm -rf "$E2E"
@@ -155,7 +200,7 @@ code=$(curl -s -o /tmp/rw-acc.json -w '%{http_code}' -X POST "$B/api/scripts/Che
 [ "$code" = "409" ] && grep -q 'DB_PASSWORD is not available in acceptance' /tmp/rw-acc.json || fail "missing secret answered $code: $(cat /tmp/rw-acc.json)"
 curl -fs "$B/api/admin/secrets" | jq -e '(.scripts[] | select(.name == "Check Credentials") | .missing.acceptance) == ["DB_PASSWORD"]' >/dev/null \
   || fail "admin secrets page does not show the gap"
-[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /etc/runwarden/secrets/production/DB_PASSWORD)" = "440" ] || fail "secret file mode"
+[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /runwarden/secrets/production/DB_PASSWORD)" = "440" ] || fail "secret file mode"
 if kubectl -n "$NS" exec deploy/runwarden -- env | grep -q "$PROD_DB"; then fail "secret in Runwarden's own environment"; fi
 echo "each environment's value reaches its runs (common as fallback), masked; missing secret refused; files 0440, not in Runwarden's env"
 
@@ -229,9 +274,42 @@ admin=$(curl -fs "$B/api/admin/secrets")
 echo "$admin" | jq -e '.kubernetes.configured and ([.kubernetes.clusters[] | select((.error // "") == "") | .environment] | sort) == ["acceptance","development","production"]' >/dev/null \
   || fail "admin overview does not list the three clusters"
 if echo "$admin" | grep -q 'eyJ'; then fail "a token reached the admin overview"; fi
-[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /etc/runwarden/kube/production/config)" = "440" ] || fail "kubeconfig file mode"
-upgrade
+[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /runwarden/kube/production/config)" = "440" ] || fail "kubeconfig file mode"
 echo "concurrent development + production runs pinned to their own namespace and ServiceAccount; source context in two-environment runs; history and admin show servers, never tokens"
+
+step "Isolation between runs (Landlock)"
+# Still maxRunsPerUser=0: the victim and the attacker run at the same time. Sign-in is off, so
+# both runs belong to the same user; another user's workspace is planted next to theirs.
+ready=$(kubectl -n "$NS" exec deploy/runwarden -- bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf "GET /readyz HTTP/1.0\r\n\r\n" >&3; cat <&3')
+echo "$ready" | grep -q 'isolation: sandboxed (Landlock ABI' || fail "readiness does not report the sandbox: $ready"
+iso=$(curl -fs "$B/api/admin/secrets" | jq -c .isolation)
+echo "$iso" | jq -e '.active and .mode == "required" and .abi >= 1' >/dev/null || fail "admin overview does not show the isolation: $iso"
+signal=open
+echo "$iso" | jq -e .signal_scoping >/dev/null && signal=blocked
+kubectl -n "$NS" exec deploy/runwarden -- sh -c 'mkdir -p -m 700 /var/lib/runwarden-work/mallory /var/lib/runwarden-work/shared && echo mallory-notes > /var/lib/runwarden-work/mallory/notes'
+victim=$(curl -fs -X POST "$B/api/scripts/Isolation%20Victim/runs" -H 'Content-Type: application/json' -d '{"values":{"Environment":"production"}}' | jq -r .id) \
+  || fail "victim did not start"
+line=
+for _ in $(seq 20); do line=$(curl -fs "$B/api/runs/$victim/output" | grep '^ready pid=') && break; sleep 0.5; done
+[ -n "$line" ] || fail "victim not ready"
+vpid=$(echo "$line" | sed 's/.*pid=\([0-9]*\).*/\1/')
+vhome=$(echo "$line" | sed 's/.*home=//')
+attack=$(curl -fs -X POST "$B/api/scripts/Isolation%20Attack/runs" -H 'Content-Type: application/json' \
+  -d "{\"values\":{\"Pid\":$vpid,\"Home\":\"$vhome\"}}" | jq -r .id) || fail "attacker did not start"
+out=$(kube_out "$attack")
+echo "$out" | grep -q 'attacks done' || fail "attack script did not finish: $out"
+for a in other-home other-environ other-mem data-dir secrets kubeconfigs runner-configs workspace-root other-workspace shared-write; do
+  echo "$out" | grep -q "attack:$a=blocked" || fail "attack $a not blocked: $out"
+done
+echo "$out" | grep -q "attack:other-signal=$signal" || fail "other-signal not $signal: $out"
+for a in own-home own-workspace system; do
+  echo "$out" | grep -q "attack:$a=open" || fail "a run cannot do $a: $out"
+done
+if echo "$out" | grep -qE "$PROD_DB|victim-home|mallory-notes"; then fail "the attacker read another run's data: $out"; fi
+kube_out "$victim" >/dev/null
+curl -fs "$B/api/runs/$victim" | jq -e '.status == "finished" and .exit_code == 0' >/dev/null || fail "victim did not survive the attack"
+upgrade
+echo "the attacker could not read the victim's HOME, environ or memory, read DATA_DIR, secrets, kubeconfigs, runner configs or another user's workspace (signals: $signal)"
 
 step "NetworkPolicy"
 api_ip=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')

@@ -8,6 +8,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/api"
 	"github.com/catalinmuraru/runwarden/internal/auth"
 	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/runwarden/internal/sandbox"
 )
 
 func get(t *testing.T, h http.Handler, method, path string) int {
@@ -19,7 +20,7 @@ func get(t *testing.T, h http.Handler, method, path string) int {
 
 func TestProbes(t *testing.T) {
 	apiSrv := api.New(api.Options{}, nil, nil)
-	mux := newHealthMux(apiSrv)
+	mux := newHealthMux(apiSrv, sandbox.Status{Mode: config.IsolationOff, Reason: "ISOLATION=off"})
 	public := newMux(apiSrv, auth.New(auth.Options{NoAuth: true}))
 	for _, p := range []string{"/healthz", "/readyz"} {
 		if code := get(t, public, http.MethodGet, p); code != http.StatusNotFound {

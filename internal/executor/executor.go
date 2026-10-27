@@ -83,6 +83,7 @@ type Executor struct {
 	byUser map[string]int // runs in progress (or starting) per lower-case user name
 
 	helperSeq atomic.Uint64 // names helper directories without using run IDs
+	sandbox   *Sandbox      // nil: runs are not sandboxed
 }
 
 // New returns an Executor with the given limits and environment policy.
@@ -179,15 +180,23 @@ func (e *Executor) start(req Request, onEnd func()) (*Run, error) {
 		}
 		return nil, err
 	}
+	ws, err := e.env.prepareWorkspace(req.User, false)
+	if err != nil {
+		return fail(err)
+	}
+	for k, v := range ws.vars {
+		fixed[k] = v
+	}
 	env, refused := e.env.build(inv.Env, req.Secrets, fixed)
 	for _, name := range refused {
 		logger().Warn("env variable refused for parameter", "script", s.Name, "variable", name)
 	}
 
-	args := append(append([]string(nil), s.Command[1:]...), inv.Args...)
+	argv := append(slices.Clone(s.Command), inv.Args...)
+	argv, env = e.wrap(argv, env, []string{ws.shared}, []string{tmpDir, ws.own})
 	// No context: a canceled context would kill only the main process, while runs end through
 	// Stop/Kill/timeout, which signal the whole process group.
-	cmd := exec.Command(s.Command[0], args...) //nolint:gosec,noctx // argv from a validated config, no shell
+	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec,noctx // argv from a validated config, no shell
 	cmd.Dir = s.WorkingDirectory
 	cmd.Env = env
 

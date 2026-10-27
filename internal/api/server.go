@@ -17,6 +17,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
 	"github.com/catalinmuraru/runwarden/internal/kube"
+	"github.com/catalinmuraru/runwarden/internal/sandbox"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
 	"github.com/catalinmuraru/runwarden/internal/settings"
 )
@@ -43,6 +44,9 @@ type Options struct {
 	Sessions SessionAdmin
 	// Settings, if set, holds the app-wide settings changed in the Admin area (the theme).
 	Settings *settings.Store
+	// Isolation is how runs are separated from each other (Landlock), shown in the Admin area
+	// and on the readiness probe.
+	Isolation sandbox.Status
 	// Helper scripts (dropdown values, defaults): concurrent calls per user and in total
 	// (defaults 2 and 10), and how long their output is reused (0: not cached).
 	ValuesMaxPerUser int

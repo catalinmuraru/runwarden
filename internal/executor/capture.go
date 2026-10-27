@@ -37,8 +37,19 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string, se
 	if dir0 != "" {
 		defer func() { _ = os.RemoveAll(dir0) }()
 	}
+	ws, err := e.env.prepareWorkspace("", true)
+	if err != nil {
+		return nil, err
+	}
+	if vars == nil {
+		vars = map[string]string{}
+	}
+	for k, v := range ws.vars {
+		vars[k] = v
+	}
 	env, _ := e.env.build(nil, secrets, vars)
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // argv from config, no shell
+	argv, env := e.wrap(command, env, []string{ws.shared}, []string{dir0})
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv from config, no shell
 	cmd.Dir = dir
 	cmd.Env = env
 	if err := prepare(cmd); err != nil {

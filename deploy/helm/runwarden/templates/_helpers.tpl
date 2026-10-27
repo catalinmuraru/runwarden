@@ -61,7 +61,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- $_ := set $e "KILL_GRACE" (toString $l.killGrace) -}}
 {{- $_ := set $e "MAX_RUNS_PER_USER" (toString $l.maxRunsPerUser) -}}
 {{- $_ := set $e "RUN_HOME" (toString .Values.runs.home) -}}
-{{- if .Values.runs.homeSkeletonConfigMap }}{{ $_ := set $e "HOME_SKELETON" "/etc/runwarden/home-skeleton" }}{{ end -}}
+{{- if .Values.runs.homeSkeletonConfigMap }}{{ $_ := set $e "HOME_SKELETON" "/runwarden/home-skeleton" }}{{ end -}}
 {{- $_ := set $e "VALUES_MAX_PER_USER" (toString .Values.valueScripts.maxPerUser) -}}
 {{- $_ := set $e "VALUES_MAX_GLOBAL" (toString .Values.valueScripts.maxGlobal) -}}
 {{- $_ := set $e "VALUES_CACHE_TTL" (toString .Values.valueScripts.cacheTTL) -}}
@@ -79,8 +79,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- fail (printf "auth.%s was removed: set auth.initialAdmin=true, sign in as the built-in administrator and give the devops role to the first user in the Admin area" $old) -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $e "SECRETS_DIR" "/etc/runwarden/secrets" -}}
-{{- $_ := set $e "KUBE_DIR" "/etc/runwarden/kube" -}}
+{{- $_ := set $e "SECRETS_DIR" "/runwarden/secrets" -}}
+{{- $_ := set $e "KUBE_DIR" "/runwarden/kube" -}}
 {{- if and .Values.kube.environments (ne (toString .Values.runs.home) "per-run") -}}
 {{- fail "kube.environments needs runs.home=per-run: the kubeconfig is written into the run's private HOME" -}}
 {{- end -}}
@@ -92,7 +92,12 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- with .Values.trustedProxies }}{{ $_ := set $e "TRUSTED_PROXIES" (join "," .) }}{{ end -}}
 {{- $_ := set $e "HISTORY_MAX_AGE" (toString .Values.history.maxAge) -}}
 {{- $_ := set $e "HISTORY_MAX_RUNS" (toString .Values.history.maxRuns) -}}
-{{- if .Values.workspace.enabled }}{{ $_ := set $e "RUNNER_ENV_RUNWARDEN_WORKSPACE" "/var/lib/runwarden-work" }}{{ end -}}
+{{- $iso := .Values.isolation -}}
+{{- $_ := set $e "ISOLATION" (toString $iso.mode) -}}
+{{- with $iso.readPaths }}{{ $_ := set $e "ISOLATION_READ_PATHS" (join "," .) }}{{ end -}}
+{{- with $iso.writePaths }}{{ $_ := set $e "ISOLATION_WRITE_PATHS" (join "," .) }}{{ end -}}
+{{- $_ := set $e "RUN_MAX_PROCS" (toString $iso.maxProcs) -}}
+{{- if .Values.workspace.enabled }}{{ $_ := set $e "WORKSPACE_DIR" "/var/lib/runwarden-work" }}{{ end -}}
 {{- if has "oidc" $methods -}}
 {{- $_ := set $e "OIDC_ISSUER_URL" (required "auth.oidc.issuerUrl is required" $a.oidc.issuerUrl) -}}
 {{- $_ := set $e "OIDC_CLIENT_ID" (required "auth.oidc.clientId is required" $a.oidc.clientId) -}}

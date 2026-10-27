@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SecretsOverview } from '../api'
-import { gapCount, kubeGapCount, secretCell, secretColumns } from './secrets'
+import { gapCount, isolationSummary, kubeGapCount, secretCell, secretColumns } from './secrets'
 
 const overview: SecretsOverview = {
   configured: true,
@@ -20,6 +20,7 @@ const overview: SecretsOverview = {
       { name: 'Scale', missing: [] },
     ],
   },
+  isolation: { mode: 'auto', active: true, abi: 7, signal_scoping: true },
 }
 
 describe('secrets matrix', () => {
@@ -39,5 +40,18 @@ describe('secrets matrix', () => {
   })
   it('counts the Kubernetes gaps', () => {
     expect(kubeGapCount(overview)).toBe(1)
+  })
+})
+
+describe('isolation summary', () => {
+  it('rates the isolation', () => {
+    expect(isolationSummary(overview.isolation).tone).toBe('ok')
+    expect(isolationSummary({ mode: 'required', active: true, abi: 4, signal_scoping: false })).toEqual({
+      tone: 'warn',
+      text: 'Sandboxed with Landlock ABI 4; signals are not scoped (needs ABI 6, kernel 6.12)',
+    })
+    expect(isolationSummary({ mode: 'auto', active: false, abi: 0, signal_scoping: false, reason: 'landlock is not available' }).text).toBe(
+      'Not sandboxed (ISOLATION=auto): landlock is not available',
+    )
   })
 })

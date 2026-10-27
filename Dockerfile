@@ -37,12 +37,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 10001 runwarden \
  && useradd --uid 10001 --gid 10001 --home-dir /home/runwarden --create-home --shell /bin/bash runwarden \
- && mkdir -p /etc/runwarden/runners /opt/runwarden /var/lib/runwarden \
+ && mkdir -p /runwarden/runners /opt/runwarden /var/lib/runwarden \
  && chown runwarden:runwarden /var/lib/runwarden
 
 COPY --from=build /out/runwarden /usr/local/bin/runwarden
 
-ENV RUNNERS_DIR=/etc/runwarden/runners \
+ENV RUNNERS_DIR=/runwarden/runners \
     BASE_DIR=/opt/runwarden \
     DATA_DIR=/var/lib/runwarden \
     LISTEN_ADDR=:8080 \

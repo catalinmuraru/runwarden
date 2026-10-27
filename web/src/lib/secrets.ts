@@ -1,5 +1,5 @@
 // The Secrets page of the Admin area: which declared secrets are available where.
-import type { SecretsOverview } from '../api'
+import type { Isolation, SecretsOverview } from '../api'
 
 export type SecretCell = { state: 'ok' } | { state: 'missing'; names: string[] } | { state: 'n/a' }
 
@@ -23,4 +23,11 @@ export function gapCount(o: SecretsOverview): number {
 /** Number of Kubernetes runner × environment combinations that cannot run for lack of a usable kubeconfig. */
 export function kubeGapCount(o: SecretsOverview): number {
   return o.kubernetes.scripts.reduce((n, s) => n + s.missing.length, 0)
+}
+
+/** One-line state of the isolation between runs, and how good it is. */
+export function isolationSummary(i: Isolation): { tone: 'ok' | 'warn' | 'bad'; text: string } {
+  if (!i.active) return { tone: 'bad', text: `Not sandboxed (ISOLATION=${i.mode}): ${i.reason ?? 'unknown reason'}` }
+  if (!i.signal_scoping) return { tone: 'warn', text: `Sandboxed with Landlock ABI ${i.abi}; signals are not scoped (needs ABI 6, kernel 6.12)` }
+  return { tone: 'ok', text: `Sandboxed with Landlock ABI ${i.abi}, signals scoped` }
 }

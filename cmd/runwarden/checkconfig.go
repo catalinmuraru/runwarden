@@ -10,6 +10,7 @@ import (
 
 	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/kube"
+	"github.com/catalinmuraru/runwarden/internal/params"
 )
 
 // checkConfig implements `runwarden check-config <runners-dir>`: it loads every runner config,
@@ -48,6 +49,7 @@ func checkConfigWith(args []string, out io.Writer, getenv func(string) string) i
 				kubeWarnings = append(kubeWarnings, missingClusters(s, kubes)...)
 			}
 		}
+		kubeWarnings = append(kubeWarnings, secureArguments(s)...)
 		for _, name := range slices.Sorted(maps.Keys(s.EnvironmentParameters)) {
 			details = append(details, fmt.Sprintf("environment from %q (%s)", name, s.EnvironmentParameters[name]))
 		}
@@ -70,6 +72,18 @@ func checkConfigWith(args []string, out io.Writer, getenv func(string) string) i
 		return 1
 	}
 	return 0
+}
+
+// secureArguments warns about secure parameters passed as command-line arguments: every
+// concurrent run can read a process's arguments (/proc/<pid>/cmdline), even when sandboxed.
+func secureArguments(s *config.Script) []string {
+	var out []string
+	for _, p := range s.Parameters {
+		if p.Secure && (p.PassAs == params.PassDefault || p.PassAs == params.PassArgument) && !p.NoValue {
+			out = append(out, fmt.Sprintf("%s: secure parameter %q is passed as an argument, which other runs can read; use \"pass_as\": \"env_variable\"", s.Name, p.Name))
+		}
+	}
+	return out
 }
 
 // missingClusters lists the environments a script can run in (static values of its environment

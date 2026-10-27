@@ -87,6 +87,15 @@
         "homeSkeletonConfigMap": { "type": "string" }
       }
     },
+    "isolation": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["auto", "required", "off"] },
+        "readPaths": { "type": "array", "items": { "type": "string", "pattern": "^/" } },
+        "writePaths": { "type": "array", "items": { "type": "string", "pattern": "^/" } },
+        "maxProcs": { "type": "integer", "minimum": 0 }
+      }
+    },
     "valueScripts": {
       "type": "object",
       "properties": {

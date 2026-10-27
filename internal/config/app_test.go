@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -92,6 +93,38 @@ func TestLoadAppInvalid(t *testing.T) {
 	}
 	for _, name := range []string{"MAX_CONCURRENT_RUNS", "RUN_TIMEOUT", "MAX_OUTPUT_BYTES"} {
 		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error does not mention %s: %v", name, err)
+		}
+	}
+}
+
+func TestIsolationSettings(t *testing.T) {
+	base := map[string]string{"AUTH_METHODS": "none", "ALLOW_NO_AUTH": "true"}
+	app, err := LoadApp(env(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.Isolation != IsolationAuto || app.WorkspaceDir != "" || app.RunMaxProcs != 0 ||
+		app.SecretsDir != "/runwarden/secrets" || app.KubeDir != "/runwarden/kube" {
+		t.Errorf("defaults: %+v", app)
+	}
+	set := maps.Clone(base)
+	maps.Copy(set, map[string]string{
+		"ISOLATION": "Required", "WORKSPACE_DIR": "/work", "RUN_MAX_PROCS": "512",
+		"ISOLATION_READ_PATHS": "/opt/tools, /srv/ref/", "ISOLATION_WRITE_PATHS": "/dev/shm",
+	})
+	if app, err = LoadApp(env(set)); err != nil {
+		t.Fatal(err)
+	}
+	if app.Isolation != IsolationRequired || app.WorkspaceDir != "/work" || app.RunMaxProcs != 512 ||
+		!slices.Equal(app.IsolationRead, []string{"/opt/tools", "/srv/ref"}) || !slices.Equal(app.IsolationWrite, []string{"/dev/shm"}) {
+		t.Errorf("set: %+v", app)
+	}
+	bad := maps.Clone(base)
+	maps.Copy(bad, map[string]string{"ISOLATION": "maybe", "ISOLATION_READ_PATHS": "relative/dir", "RUN_MAX_PROCS": "-1"})
+	_, err = LoadApp(env(bad))
+	for _, name := range []string{"ISOLATION:", "ISOLATION_READ_PATHS", "RUN_MAX_PROCS"} {
+		if err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("error does not mention %s: %v", name, err)
 		}
 	}
