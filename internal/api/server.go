@@ -18,6 +18,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/history"
 	"github.com/catalinmuraru/runwarden/internal/kube"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/runwarden/internal/settings"
 )
 
 // Options configure the API.
@@ -40,6 +41,8 @@ type Options struct {
 	Kube kube.Store
 	// Sessions, if set, lets admins see and revoke sign-in sessions.
 	Sessions SessionAdmin
+	// Settings, if set, holds the app-wide settings changed in the Admin area (the theme).
+	Settings *settings.Store
 	// Helper scripts (dropdown values, defaults): concurrent calls per user and in total
 	// (defaults 2 and 10), and how long their output is reused (0: not cached).
 	ValuesMaxPerUser int
@@ -144,6 +147,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 		}
 	}
 	h := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, authenticate(s.trackActivity(fn))) }
+	// Public: the sign-in page needs the theme too.
+	mux.HandleFunc("GET /api/settings/ui", s.getUISettings)
 	h("GET /api/scripts", s.listScripts)
 	h("GET /api/scripts/{name}", s.getScript)
 	h("GET /api/scripts/{name}/parameters/{param}/values", s.parameterValues)
@@ -161,6 +166,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	h("GET /api/admin/activity", s.adminOnly(s.adminActivity))
 	h("POST /api/admin/users/{name}/sign-out", s.adminOnly(s.adminSignOut))
 	h("GET /api/admin/secrets", s.adminOnly(s.adminSecrets))
+	h("PUT /api/admin/settings/ui", s.adminOnly(s.putUISettings))
 	h("GET /api/admin/policy", s.policyOnly(s.getPolicy))
 	h("PUT /api/admin/policy/environments", s.policyOnly(s.putEnvironments))
 	h("POST /api/admin/policy/roles", s.policyOnly(s.postRole))

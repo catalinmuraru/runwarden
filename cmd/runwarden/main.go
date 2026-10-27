@@ -28,6 +28,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/logging"
 	"github.com/catalinmuraru/runwarden/internal/policy"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/runwarden/internal/settings"
 	"github.com/catalinmuraru/runwarden/internal/web"
 )
 
@@ -109,6 +110,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	appSettings, err := settings.Open(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("settings: %w", err)
+	}
 	opts := api.Options{
 		BaseDir:        cfg.BaseDir,
 		DataDir:        cfg.DataDir,
@@ -120,6 +125,7 @@ func run() error {
 		Activity:       acts,
 		Secrets:        secrets.Store{Dir: cfg.SecretsDir},
 		Kube:           kube.Store{Dir: cfg.KubeDir},
+		Settings:       appSettings,
 
 		ValuesMaxPerUser: cfg.ValuesMaxPerUser,
 		ValuesMaxGlobal:  cfg.ValuesMaxGlobal,

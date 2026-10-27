@@ -19,8 +19,12 @@
   background: var(--bg);
 }
 
+/* The theme an administrator picks (Admin > Appearance) sets html[data-theme]; without it the OS decides. */
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #14171d;
     --surface: #1c2028;
     --fg: #e4e7ec;
@@ -34,6 +38,21 @@
     --bad: #f07b72;
     --focus: #8aa9f5;
   }
+}
+
+:root[data-theme='dark'] {
+  --bg: #14171d;
+  --surface: #1c2028;
+  --fg: #e4e7ec;
+  --muted: #9aa3b2;
+  --border: #323846;
+  --accent: #6e95f2;
+  --accent-fg: #0d1117;
+  --info: #8aa9f5;
+  --ok: #5cc28a;
+  --warn: #e3a64a;
+  --bad: #f07b72;
+  --focus: #8aa9f5;
 }
 
 * { box-sizing: border-box; }

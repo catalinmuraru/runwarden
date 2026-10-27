@@ -5,6 +5,7 @@ import { api, ApiError, type ImportSummary } from '../api'
 import { changePolicy, loadPolicy, policyState } from '../lib/policyState'
 import AccessTab from './admin/AccessTab.vue'
 import ActivityTab from './admin/ActivityTab.vue'
+import AppearanceTab from './admin/AppearanceTab.vue'
 import EnvironmentsTab from './admin/EnvironmentsTab.vue'
 import ExceptionsTab from './admin/ExceptionsTab.vue'
 import RolesTab from './admin/RolesTab.vue'
@@ -24,6 +25,7 @@ const tabs = [
   { id: 'access', label: 'Access' },
   { id: 'secrets', label: 'Secrets' },
   { id: 'activity', label: 'Activity' },
+  { id: 'appearance', label: 'Appearance' },
 ] as const
 type Tab = (typeof tabs)[number]['id']
 
@@ -32,6 +34,7 @@ const tab = computed<Tab>(() => tabs.find((t) => t.id === q('tab'))?.id ?? 'user
 
 const users = ref<InstanceType<typeof UsersTab>>()
 const activity = ref<InstanceType<typeof ActivityTab>>()
+const appearance = ref<InstanceType<typeof AppearanceTab>>()
 const importFile = ref<HTMLInputElement>()
 const pending = ref<{ yaml: string; summary: ImportSummary; warnings: string[] } | null>(null)
 const importError = ref('')
@@ -44,6 +47,7 @@ async function refresh() {
   await loadPolicy()
   await users.value?.load()
   await activity.value?.load()
+  await appearance.value?.load()
 }
 
 async function chooseImport(e: Event) {
@@ -115,11 +119,12 @@ onMounted(loadPolicy)
     </button>
   </div>
 
-  <p v-if="!policyState.view && policyState.error && tab !== 'activity'" class="alert" role="alert">{{ policyState.error }}</p>
+  <p v-if="!policyState.view && policyState.error && tab !== 'activity' && tab !== 'appearance'" class="alert" role="alert">{{ policyState.error }}</p>
   <UsersTab v-if="tab === 'users'" ref="users" @activity="(u) => show('activity', { user: u })" @access="(u) => show('access', { user: u })" />
   <template v-else-if="tab === 'activity'">
     <ActivityTab ref="activity" />
   </template>
+  <AppearanceTab v-else-if="tab === 'appearance'" ref="appearance" />
   <p v-else-if="!policyState.view" class="muted">Loading…</p>
   <RolesTab v-else-if="tab === 'roles'" @access="(r) => show('access', { role: r })" @rules="(r) => show('rules', { role: r })" />
   <RulesTab v-else-if="tab === 'rules'" :role="q('role')" />

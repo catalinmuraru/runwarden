@@ -28,6 +28,7 @@ const (
 	SessionRevoke  = "session-revoke"
 	PolicyChange   = "policy-change"
 	PolicyExpiry   = "exception-expired"
+	SettingsChange = "settings-change"
 )
 
 // Event is one audited action.

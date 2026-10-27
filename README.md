@@ -52,8 +52,11 @@ the right.
   value belongs to); **Secrets** — which declared secrets each environment has or misses (names
   only); **Access** — what a user or role may do, script by environment, and which
   rule grants it; **Activity** — the audit trail (runs, input, stop/kill, sign-ins, policy
-  changes, reloads, clean-ups), filterable by user, action, result and script. **Export policy**
-  downloads the policy as YAML; **Import policy** replaces it after showing what changes.
+  changes, reloads, clean-ups), filterable by user, action, result and script; **Appearance** —
+  the colour theme for everyone, the sign-in page included: System (follows each user's
+  operating system, the default), Light or Dark. It is kept in `DATA_DIR/settings.json`; other
+  users get a new theme on their next page load. **Export policy** downloads the policy as YAML;
+  **Import policy** replaces it after showing what changes.
 - **Notifications**: the bell under the script list turns on browser notifications for your own runs
   (needs HTTPS or localhost). They arrive while a Runwarden tab is open, even in the background.
 
@@ -183,7 +186,7 @@ All settings come from environment variables. Secrets are never read from files.
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `RUNNERS_DIR` | `./runners` | directory with runner configs (scanned recursively) |
 | `BASE_DIR` | working directory | base for relative paths inside runner configs |
-| `DATA_DIR` | `./data` | run history and temporary uploads |
+| `DATA_DIR` | `./data` | run history, temporary uploads, policy, sessions and UI settings (`settings.json`) |
 | `MAX_CONCURRENT_RUNS` | `10` | runs beyond this are rejected with `429` |
 | `RUN_TIMEOUT` | `60m` | default time limit per run |
 | `RUN_TIMEOUT_MAX` | `24h` | largest `timeout` a runner config may set (larger values are a config error) |
