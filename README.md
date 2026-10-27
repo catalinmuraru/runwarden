@@ -25,17 +25,24 @@ single binary and container image and is meant to run on Kubernetes.
 
 ## Web UI
 
-- **Scripts**: the scripts you may see, grouped and filterable (by name, group, description or
-  tag). Users without a role are told to ask an administrator for access.
+The page has two parts: the script list on the left, always visible, and the selected page on
+the right.
+
+- **Script list**: the scripts you may see, by group (click a group to open or close it), with a
+  search box (name, group, description or tag) and links to Running, History and Admin below.
+  Hovering a name shows its description. On narrow screens the list opens from the ☰ button.
 - **Script page**: description and a form generated from the parameters (lists that depend on
   other fields reload as you type, server files are browsed, uploads attach files); server-side
   validation errors appear next to the fields. Environments you may only view are marked
-  "view only", and Run is disabled (with the reason) while one is selected.
-- **Run page**: live terminal with colours, an input line for scripts that ask questions, Stop and
-  Kill, the masked arguments and values, downloadable output files, and "Run again" with the same
-  values. Reloading or losing the connection resumes the output where it stopped.
+  "view only", and Execute is disabled (with the reason) while one is selected. Execute shows the
+  run's output under the form: live terminal with colours, an input line for scripts that ask
+  questions, Stop and Kill, and downloadable output files. Users without a role are told to ask
+  an administrator for access.
+- **Run page** (from History or a run's Details link): the same output plus the masked arguments
+  and values, and "Run again" with the same values. Reloading or losing the connection resumes
+  the output where it stopped.
 - **Running**: runs in progress that you may see, with Stop on your own (devops: on every run).
-  The header shows how many are running.
+  The Running link shows how many are running.
 - **History**: runs you may see (your own, and every run of a script in an environment where you
   have view access; everything for devops), filterable by script, status and user.
 - **Admin** (devops only): **Users** — everyone who signed in, their roles (changed here), groups
@@ -47,7 +54,7 @@ single binary and container image and is meant to run on Kubernetes.
   rule grants it; **Activity** — the audit trail (runs, input, stop/kill, sign-ins, policy
   changes, reloads, clean-ups), filterable by user, action, result and script. **Export policy**
   downloads the policy as YAML; **Import policy** replaces it after showing what changes.
-- **Notifications**: the bell in the header turns on browser notifications for your own runs
+- **Notifications**: the bell under the script list turns on browser notifications for your own runs
   (needs HTTPS or localhost). They arrive while a Runwarden tab is open, even in the background.
 
 The UI is a Vue 3 single-page app embedded in the binary and served with a strict
