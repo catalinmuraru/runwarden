@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-ldap/ldap/v3"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/ward/internal/config"
 )
 
 const ldapTimeout = 10 * time.Second

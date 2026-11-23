@@ -1,9 +1,9 @@
 # Local identity providers for development and the auth integration tests.
 #   docker compose -f deploy/dev/compose.yaml up -d
-# Keycloak: http://localhost:8180 (admin/admin), realm "runwarden".
+# Keycloak: http://localhost:8180 (admin/admin), realm "ward".
 # OpenLDAP: ldap://localhost:1389, base dc=example,dc=org.
 # Test users in both: alice / alice-password (group "ops"), bob / bob-password (no groups).
-name: runwarden-dev
+name: ward-dev
 
 services:
   keycloak:

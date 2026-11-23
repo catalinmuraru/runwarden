@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/ward/internal/config"
 )
 
 // Built-in roles.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/ward/internal/config"
 )
 
 var seedEnvs = []Environment{

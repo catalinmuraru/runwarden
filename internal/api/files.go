@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 type fileEntry struct {

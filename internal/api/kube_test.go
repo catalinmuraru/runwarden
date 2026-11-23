@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/activity"
-	"github.com/catalinmuraru/runwarden/internal/audit"
-	"github.com/catalinmuraru/runwarden/internal/authz"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/kube"
+	"github.com/catalinmuraru/ward/internal/activity"
+	"github.com/catalinmuraru/ward/internal/audit"
+	"github.com/catalinmuraru/ward/internal/authz"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/kube"
 )
 
 // kubeDir lays out one kubeconfig per environment like mounted Kubernetes Secrets.

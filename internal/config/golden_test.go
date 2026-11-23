@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // TestGoldenInvocations is the end-to-end check for the example runners: client values in,

@@ -58,7 +58,7 @@ async function submit() {
 <template>
   <main class="container">
     <div class="card stack" style="max-width: 24rem; margin: 3rem auto">
-      <h1>Runwarden</h1>
+      <h1>Ward</h1>
       <p v-if="error" class="alert" role="alert">{{ error }}</p>
       <p v-if="!loaded" class="muted">Loading…</p>
 

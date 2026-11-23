@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v4"
+
+	"github.com/catalinmuraru/ward/internal/compat"
 )
 
 // FileName is the kubeconfig file inside an environment directory.
@@ -27,8 +29,8 @@ const maxSize = 256 << 10
 
 // Variables a run receives next to KUBECONFIG.
 const (
-	ContextVar       = "RUNWARDEN_KUBE_CONTEXT"
-	SourceContextVar = "RUNWARDEN_KUBE_SOURCE_CONTEXT"
+	ContextVar       = "WARD_KUBE_CONTEXT"
+	SourceContextVar = "WARD_KUBE_SOURCE_CONTEXT"
 )
 
 var envPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -274,6 +276,7 @@ func (s Store) Resolve(targets, sources []string) (Result, error) {
 		return Result{}, err
 	}
 	res.Kubeconfig = data
+	compat.ExportBoth(res.Env) // v0.5: for executors that predate the rename
 	return res, nil
 }
 

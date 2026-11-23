@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/activity"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/remote"
-	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/ward/internal/activity"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/remote"
+	"github.com/catalinmuraru/ward/internal/secrets"
 )
 
 const executorToken = "production-executor-token" //nolint:gosec // test value

@@ -25,7 +25,7 @@ router.beforeEach(async (to) => {
 
 router.afterEach((to) => {
   const page = (to.meta.title as string | undefined) ?? (to.params.name as string | undefined) ?? (to.params.id as string | undefined)
-  document.title = page ? `${page} · Runwarden` : 'Runwarden'
+  document.title = page ? `${page} · Ward` : 'Ward'
 })
 
 setUnauthorizedHandler(() => {

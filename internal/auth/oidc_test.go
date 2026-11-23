@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/ward/internal/config"
 )
 
 // fakeIDP is a minimal OpenID provider: discovery, JWKS, token and userinfo endpoints, with
@@ -48,7 +48,7 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeIDP{t: t, key: key, clientID: "runwarden", codes: map[string]grant{}, expIn: time.Hour}
+	f := &fakeIDP{t: t, key: key, clientID: "ward", codes: map[string]grant{}, expIn: time.Hour}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -179,7 +179,7 @@ func TestOIDCSignIn(t *testing.T) {
 	if u.Name != "alice" || !slices.Equal(u.Groups, []string{"ops", "dev"}) {
 		t.Errorf("user = %+v", u)
 	}
-	if lu := p.LogoutURL(); !strings.HasPrefix(lu, f.URL+"/logout?") || !strings.Contains(lu, "client_id=runwarden") {
+	if lu := p.LogoutURL(); !strings.HasPrefix(lu, f.URL+"/logout?") || !strings.Contains(lu, "client_id=ward") {
 		t.Errorf("logout url = %q", lu)
 	}
 }

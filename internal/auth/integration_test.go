@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/ward/internal/config"
 )
 
 const appAddr = "127.0.0.1:18089" // registered as a redirect URI in the dev realm
@@ -76,7 +76,7 @@ func me(t *testing.T, client *http.Client) (meResponse, int) {
 
 var loginForm = regexp.MustCompile(`<form[^>]+action="([^"]+)"`)
 
-// browserLogin signs in like a browser: Runwarden → Keycloak login form → callback.
+// browserLogin signs in like a browser: Ward → Keycloak login form → callback.
 func browserLogin(t *testing.T, user, password string) *http.Client {
 	t.Helper()
 	jar, _ := cookiejar.New(nil)
@@ -103,8 +103,8 @@ func browserLogin(t *testing.T, user, password string) *http.Client {
 
 func TestIntegrationOIDCKeycloak(t *testing.T) {
 	p, err := NewOIDC(t.Context(), config.OIDC{ //nolint:gosec // client secret of the local dev realm
-		IssuerURL:     envOr("RW_IT_OIDC_ISSUER", "http://localhost:8180/realms/runwarden"),
-		ClientID:      "runwarden",
+		IssuerURL:     envOr("RW_IT_OIDC_ISSUER", "http://localhost:8180/realms/ward"),
+		ClientID:      "ward",
 		ClientSecret:  "dev-client-secret",
 		Scopes:        []string{"openid", "profile", "email"},
 		UsernameClaim: "preferred_username",

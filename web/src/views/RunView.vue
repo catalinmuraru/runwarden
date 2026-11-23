@@ -8,7 +8,7 @@ const script = ref('')
 
 function loaded(meta: RunMeta) {
   script.value = meta.script
-  document.title = `${meta.script} · Runwarden`
+  document.title = `${meta.script} · Ward`
 }
 </script>
 

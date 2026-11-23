@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/params"
-	"github.com/catalinmuraru/runwarden/internal/policy"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/params"
+	"github.com/catalinmuraru/ward/internal/policy"
 )
 
 type scriptSummary struct {

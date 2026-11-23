@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // maxLineHold bounds how much of an unfinished line is held back for regex redaction.

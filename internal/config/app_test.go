@@ -41,8 +41,8 @@ func TestLoadAppValues(t *testing.T) {
 		"AUTH_TYPE":           "none",
 		"ALLOW_NO_AUTH":       "true",
 		"LISTEN_ADDR":         "127.0.0.1:9000",
-		"RUNNERS_DIR":         "/etc/runwarden/runners",
-		"DATA_DIR":            "/var/lib/runwarden",
+		"RUNNERS_DIR":         "/etc/ward/runners",
+		"DATA_DIR":            "/var/lib/ward",
 		"MAX_CONCURRENT_RUNS": "3",
 		"RUN_TIMEOUT":         "2h",
 		"KILL_GRACE":          "5s",
@@ -53,7 +53,7 @@ func TestLoadAppValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app.ListenAddr != "127.0.0.1:9000" || app.RunnersDir != "/etc/runwarden/runners" || app.DataDir != "/var/lib/runwarden" ||
+	if app.ListenAddr != "127.0.0.1:9000" || app.RunnersDir != "/etc/ward/runners" || app.DataDir != "/var/lib/ward" ||
 		app.MaxConcurrentRuns != 3 || app.RunTimeout != 2*time.Hour || app.KillGrace != 5*time.Second ||
 		app.MaxOutputBytes != 64<<10 || app.MaxUploadBytes != 1<<30 ||
 		!slices.Equal(app.AllowedOrigins, []string{"ops.example.com", "*.example.org"}) {
@@ -105,7 +105,7 @@ func TestIsolationSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if app.Isolation != IsolationAuto || app.WorkspaceDir != "" || app.RunMaxProcs != 0 ||
-		app.SecretsDir != "/runwarden/secrets" || app.KubeDir != "/runwarden/kube" {
+		app.SecretsDir != "/ward/secrets" || app.KubeDir != "/ward/kube" {
 		t.Errorf("defaults: %+v", app)
 	}
 	set := maps.Clone(base)
@@ -174,7 +174,7 @@ func TestLoadAuth(t *testing.T) {
 		{
 			name: "several methods, in order",
 			vars: with(gitlab, oidc, ldap, map[string]string{"AUTH_METHODS": " GitLab, ldap ,oidc", "OIDC_SCOPES": "groups openid",
-				"SESSION_TTL": "1h", "GITLAB_REQUIRED_GROUP": "/company/runwarden/", "OIDC_LABEL": "Keycloak"}),
+				"SESSION_TTL": "1h", "GITLAB_REQUIRED_GROUP": "/company/ward/", "OIDC_LABEL": "Keycloak"}),
 			check: func(t *testing.T, a Auth) {
 				if !slices.Equal(a.Methods, []string{"gitlab", "ldap", "oidc"}) || a.NoAuth || a.InitialAdmin ||
 					a.PublicURL != "https://rw.example.com" || !a.CookieSecure || len(a.SessionKey) != 32 || a.SessionTTL != time.Hour ||
@@ -186,7 +186,7 @@ func TestLoadAuth(t *testing.T) {
 					t.Errorf("oidc = %+v", a.OIDC)
 				}
 				if a.GitLab.IssuerURL != "https://gitlab.example.com" || a.GitLab.UsernameClaim != "nickname" || a.GitLab.Label != "GitLab" ||
-					!slices.Equal(a.GitLab.GroupsClaims, []string{"groups", "groups_direct"}) || a.GitLab.RequiredGroup != "company/runwarden" {
+					!slices.Equal(a.GitLab.GroupsClaims, []string{"groups", "groups_direct"}) || a.GitLab.RequiredGroup != "company/ward" {
 					t.Errorf("gitlab = %+v", a.GitLab)
 				}
 				if a.LDAP.UserFilter != "(uid={username})" || a.LDAP.GroupFilter != "(member={dn})" || a.LDAP.GroupNameAttr != "cn" || a.LDAP.Label != "Directory" {
@@ -371,14 +371,14 @@ func TestAccessSettings(t *testing.T) {
 
 func TestLoadExecutor(t *testing.T) {
 	app, err := LoadExecutor(env(map[string]string{
-		"EXECUTOR_SERVER_URL": "http://runwarden:8080", "EXECUTOR_TOKEN": "t0ken", //nolint:gosec // test value
+		"EXECUTOR_SERVER_URL": "http://ward:8080", "EXECUTOR_TOKEN": "t0ken", //nolint:gosec // test value
 		"EXECUTOR_ENVIRONMENT": "dev", "POD_NAME": "exec-prod-0", "MAX_CONCURRENT_RUNS": "3",
 	}), "prod")
 	if err != nil {
 		t.Fatal(err)
 	}
 	x := app.Executor
-	if x.ServerURL != "http://runwarden:8080" || x.Token != "t0ken" || x.Environment != "prod" || x.Pod != "exec-prod-0" || app.MaxConcurrentRuns != 3 {
+	if x.ServerURL != "http://ward:8080" || x.Token != "t0ken" || x.Environment != "prod" || x.Pod != "exec-prod-0" || app.MaxConcurrentRuns != 3 {
 		t.Errorf("executor config %+v, runs %d", x, app.MaxConcurrentRuns)
 	}
 	if len(app.Auth.Methods) != 0 {

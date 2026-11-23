@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/catalinmuraru/runwarden/internal/authz"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/kube"
-	"github.com/catalinmuraru/runwarden/internal/policy"
-	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/ward/internal/authz"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/kube"
+	"github.com/catalinmuraru/ward/internal/policy"
+	"github.com/catalinmuraru/ward/internal/secrets"
 )
 
 // splitUses returns the target and the source environments of uses.

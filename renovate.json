@@ -91,7 +91,7 @@
     {
       "description": "The chart's own image follows the chart appVersion, which the release workflow sets.",
       "matchManagers": ["helm-values"],
-      "matchPackageNames": ["ghcr.io/catalinmuraru/runwarden"],
+      "matchPackageNames": ["ghcr.io/catalinmuraru/ward"],
       "enabled": false
     },
     {

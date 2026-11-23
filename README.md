@@ -1,6 +1,6 @@
-# Runwarden
+# Ward
 
-A guarded place to run scripts. Runwarden is a self-hosted web UI for running a catalogue of bash
+A guarded place to run scripts. Ward is a self-hosted web UI for running a catalogue of bash
 scripts with typed parameters, live output, execution history and access control. It ships as a
 single binary and container image and is meant to run on Kubernetes.
 
@@ -58,7 +58,7 @@ the right.
   users get a new theme on their next page load. **Export policy** downloads the policy as YAML;
   **Import policy** replaces it after showing what changes.
 - **Notifications**: the bell under the script list turns on browser notifications for your own runs
-  (needs HTTPS or localhost). They arrive while a Runwarden tab is open, even in the background.
+  (needs HTTPS or localhost). They arrive while a Ward tab is open, even in the background.
 
 The UI is a Vue 3 single-page app embedded in the binary and served with a strict
 Content-Security-Policy.
@@ -125,7 +125,7 @@ Every run also gets `EXECUTION_ID`. Booleans may be written as `true` or `"true"
 Validate a runners directory before deploying it:
 
 ```bash
-go run ./cmd/runwarden check-config path/to/runners
+go run ./cmd/ward check-config path/to/runners
 ```
 
 ## Execution
@@ -152,8 +152,8 @@ go run ./cmd/runwarden check-config path/to/runners
   `AZURE_CONFIG_DIR=$HOME/.azure`, removed when it ends. A kube context, `az` login or git
   credentials written by one run never reach another run, e.g. one user working on production
   while another works on development. Scripts therefore log in per run (`az login`); runners
-  with `"kubernetes": true` get their cluster from Runwarden (see *Kubernetes clusters per
-  environment*) instead of `az aks get-credentials`; files that must survive go to `$RUNWARDEN_WORKSPACE`. `HOME_SKELETON`
+  with `"kubernetes": true` get their cluster from Ward (see *Kubernetes clusters per
+  environment*) instead of `az aks get-credentials`; files that must survive go to `$WARD_WORKSPACE`. `HOME_SKELETON`
   is copied into every new HOME (e.g. `.gitconfig`, `.ssh/known_hosts`). `RUN_HOME=shared`
   keeps one HOME for all runs, for scripts that are not migrated yet. All runs share one user ID;
   *Isolation between runs* below keeps them apart.
@@ -168,28 +168,28 @@ go run ./cmd/runwarden check-config path/to/runners
   command lines, so `check-config` warns about `secure` parameters passed as arguments (use
   `"pass_as": "env_variable"`). Memory, CPU and process count are shared by all runs
   (`RUN_MAX_PROCS` sets `RLIMIT_NPROC`, which counts all processes of the user ID: a guard, not
-  a quota). At startup Runwarden checks that no private directory lies below a path every run can
+  a quota). At startup Ward checks that no private directory lies below a path every run can
   access and runs a sandboxed self-test in the run and workspace directories (Landlock does not
   work on every filesystem, e.g. 9p). `auto` runs scripts unsandboxed with a warning in the log
-  when any of this fails, or when Runwarden runs as root; `required` refuses to start; `off`
+  when any of this fails, or when Ward runs as root; `required` refuses to start; `off`
   disables the sandbox.
-- **Workspace per user** (`WORKSPACE_DIR`): a run gets `RUNWARDEN_WORKSPACE=<dir>/<user>`
+- **Workspace per user** (`WORKSPACE_DIR`): a run gets `WARD_WORKSPACE=<dir>/<user>`
   (created on first use, `0700`), for files that must survive between runs, and
-  `RUNWARDEN_SHARED=<dir>/shared`, read-only for runs (team tools, filled by operators). Dropdown
-  helpers get only `RUNWARDEN_SHARED`. User names with characters other than letters, digits,
+  `WARD_SHARED=<dir>/shared`, read-only for runs (team tools, filled by operators). Dropdown
+  helpers get only `WARD_SHARED`. User names with characters other than letters, digits,
   `.`, `-` and `_` get a hash suffix.
 - **One run per user** (`MAX_RUNS_PER_USER`, default 1, admins included): a second start answers
   `429` with the ID of the run in progress; other users are not affected.
 - Dropdown helper scripts run at most `VALUES_MAX_PER_USER` (2) at a time per user and
   `VALUES_MAX_GLOBAL` (10) in total (`429` beyond), and their output is reused for
   `VALUES_CACHE_TTL` (60 s), so forms stay fast and cannot be used to flood the server.
-- Environment: scripts never inherit Runwarden's environment. They get `PATH`, `HOME`, `LANG`,
+- Environment: scripts never inherit Ward's environment. They get `PATH`, `HOME`, `LANG`,
   `TZ` (defaults `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
   `LANG=C.UTF-8`), every `RUNNER_ENV_<NAME>` variable as `<NAME>`, `EXECUTION_ID`,
-  `RUNWARDEN_USER` (who started the run), `TMPDIR`, `TERM` on a terminal,
-  `RUNWARDEN_WORKSPACE` and `RUNWARDEN_SHARED` with `WORKSPACE_DIR`, their parameter
+  `WARD_USER` (who started the run), `TMPDIR`, `TERM` on a terminal,
+  `WARD_WORKSPACE` and `WARD_SHARED` with `WORKSPACE_DIR`, their parameter
   variables and the secrets they declare (see *Secrets*). Parameters cannot set `PATH`, `HOME`,
-  `IFS`, `ENV`, `BASH_ENV`, `LD_*`, `RUNWARDEN_USER`, `TMPDIR`, `TERM`, a declared secret and
+  `IFS`, `ENV`, `BASH_ENV`, `LD_*`, `WARD_USER`, `TMPDIR`, `TERM`, a declared secret and
   similar variables.
 
 | Limit | Default |
@@ -217,13 +217,13 @@ All settings come from environment variables. Secrets are never read from files.
 | `MAX_UPLOAD_BYTES` | `100Mi` | maximum upload request size |
 | `ALLOWED_ORIGINS` | – | extra hosts allowed to open WebSockets, comma-separated (`ops.example.com,*.example.org`); the server's own host is always allowed |
 | `RUNNER_ENV_<NAME>` | – | passed to every script as `<NAME>`: for settings, **not secrets** (the server warns about names that look like secrets) |
-| `SECRETS_DIR` | `/runwarden/secrets` | secrets per environment, see *Secrets*; not below `/etc` or another path runs can read |
-| `KUBE_DIR` | `/runwarden/kube` | kubeconfig per environment, see *Kubernetes clusters per environment* |
+| `SECRETS_DIR` | `/ward/secrets` | secrets per environment, see *Secrets*; not below `/etc` or another path runs can read |
+| `KUBE_DIR` | `/ward/kube` | kubeconfig per environment, see *Kubernetes clusters per environment* |
 | `ISOLATION` | `auto` | Landlock sandbox per run: `auto`, `required` or `off`, see *Isolation between runs* |
 | `ISOLATION_READ_PATHS`, `ISOLATION_WRITE_PATHS` | – | more absolute paths every sandboxed run may read, or write (shared by all runs), comma-separated |
 | `RUN_MAX_PROCS` | `0` | `RLIMIT_NPROC` of sandboxed runs (`0`: unchanged) |
 | `WORKSPACE_DIR` | – | per-user workspaces, see *Workspace per user* |
-| `EXECUTORS` | – | environments whose runs and dropdown helpers execute on their own executors (`runwarden executor`), as JSON `{"<environment>": "<hex SHA-256 of its executor token>"}`; their secrets and kubeconfig must not be mounted on the server (it refuses to start); without a connected executor their runs are refused |
+| `EXECUTORS` | – | environments whose runs and dropdown helpers execute on their own executors (`ward executor`), as JSON `{"<environment>": "<hex SHA-256 of its executor token>"}`; their secrets and kubeconfig must not be mounted on the server (it refuses to start); without a connected executor their runs are refused |
 | `TRUSTED_PROXIES` | – | CIDRs of your ingress / load balancer; only they may set `X-Forwarded-For` (client address in audit logs and the sign-in rate limit) |
 | `HISTORY_MAX_AGE` | `90d` | remove finished runs and activity-log days older than this (`d` or Go durations; `0` keeps them) |
 | `HISTORY_MAX_RUNS` | `0` | keep at most this many runs (`0`: no limit); running runs are never removed |
@@ -244,11 +244,11 @@ liveness; `GET /readyz` reports ready once runner configs are loaded.
 
 ## Logs and audit trail
 
-Runwarden writes one JSON object per line to stdout in
+Ward writes one JSON object per line to stdout in
 [Elastic Common Schema](https://www.elastic.co/guide/en/ecs/current/index.html) (ECS 8.11):
 `@timestamp`, `log.level`, `message`, `ecs.version`, `service.name`/`service.version`, and
-`event.dataset` — `runwarden.audit` for the audit trail, `runwarden.app` for everything else.
-Custom fields live under `runwarden.*`.
+`event.dataset` — `ward.audit` for the audit trail, `ward.app` for everything else.
+Custom fields live under `ward.*`.
 
 Audit events answer who did what and with which result:
 
@@ -263,12 +263,12 @@ Audit events answer who did what and with which result:
 
 Fields: `user.name`, `user.roles` (groups), `source.ip`, `user_agent.original`,
 `event.category`/`event.type`/`event.duration` (ns), `process.exit_code`, `process.args`
-(masked), `runwarden.run.id`, `runwarden.run.status`, `runwarden.run.parameters` (masked values
+(masked), `ward.run.id`, `ward.run.status`, `ward.run.parameters` (masked values
 as one JSON string, so arbitrary parameter names can't explode the index mapping) and
-`runwarden.script.name`. Secure values, hidden input and passwords never appear.
+`ward.script.name`. Secure values, hidden input and passwords never appear.
 
 ```json
-{"@timestamp":"2026-10-25T04:03:11.765Z","log.level":"info","message":"run 20261025-040310.753-0001 of \"Restart Service\" by alice: finished (exit code 0)","ecs.version":"8.11.0","service":{"name":"runwarden","version":"0.2.0"},"event":{"kind":"event","category":["process"],"type":["end"],"action":"run-end","outcome":"success","dataset":"runwarden.audit","duration":1010455273},"user":{"name":"alice","roles":["ops"]},"source":{"ip":"198.51.100.23"},"process":{"exit_code":0,"args":["--service","api","--timeout","30"]},"runwarden":{"run":{"id":"20261025-040310.753-0001","status":"finished","parameters":"{\"Service\":\"api\",\"Timeout seconds\":\"30\"}"},"script":{"name":"Restart Service"}}}
+{"@timestamp":"2026-10-25T04:03:11.765Z","log.level":"info","message":"run 20261025-040310.753-0001 of \"Restart Service\" by alice: finished (exit code 0)","ecs.version":"8.11.0","service":{"name":"ward","version":"0.5.0"},"event":{"kind":"event","category":["process"],"type":["end"],"action":"run-end","outcome":"success","dataset":"ward.audit","duration":1010455273},"user":{"name":"alice","roles":["ops"]},"source":{"ip":"198.51.100.23"},"process":{"exit_code":0,"args":["--service","api","--timeout","30"]},"ward":{"run":{"id":"20261025-040310.753-0001","status":"finished","parameters":"{\"Service\":\"api\",\"Timeout seconds\":\"30\"}"},"script":{"name":"Restart Service"}}}
 ```
 
 The same audit events are also kept in `DATA_DIR/activity/` (one JSON-lines file per day, plus
@@ -288,10 +288,10 @@ filebeat.autodiscover:
       templates:
         - condition:
             equals:
-              kubernetes.labels.app.kubernetes.io/name: runwarden
+              kubernetes.labels.app.kubernetes.io/name: ward
           config:
             - type: filestream
-              id: runwarden-${data.kubernetes.container.id}
+              id: ward-${data.kubernetes.container.id}
               paths:
                 - /var/log/containers/*-${data.kubernetes.container.id}.log
               prospector.scanner.symlinks: true
@@ -305,7 +305,7 @@ filebeat.autodiscover:
 ```
 
 Outside Kubernetes, point a `filestream` input with the same `ndjson` parser at the file stdout
-is written to. Search the audit trail in Kibana with `event.dataset : "runwarden.audit"`.
+is written to. Search the audit trail in Kibana with `event.dataset : "ward.audit"`.
 
 ## Authentication and authorization
 
@@ -316,7 +316,7 @@ refuses to start without one. Several can be enabled at once (e.g. `gitlab,ldap`
 |---|---|---|
 | `AUTH_METHODS` | **required** | `gitlab`, `oidc`, `ldap` (comma-separated), or `none` alone for local development (no sign-in, everyone is an admin; also needs `ALLOW_NO_AUTH=true`). `AUTH_TYPE` (one method) is still read, with a deprecation warning |
 | `INITIAL_ADMIN` | `false` | built-in administrator `admin@local`, see below |
-| `PUBLIC_URL` | – | external URL, e.g. `https://runwarden.example.com` (gitlab, oidc); the redirect URI to register is `PUBLIC_URL/auth/callback` for every provider |
+| `PUBLIC_URL` | – | external URL, e.g. `https://ward.example.com` (gitlab, oidc); the redirect URI to register is `PUBLIC_URL/auth/callback` for every provider |
 | `SESSION_KEY` | – | 32 random bytes, base64 (`openssl rand -base64 32`); required unless `none` |
 | `SESSION_TTL` | `12h` | how long a sign-in lasts |
 | `COOKIE_SECURE` | `true` (`false` if `PUBLIC_URL` is `http://`) | `Secure` flag on cookies |
@@ -355,7 +355,7 @@ Sign-in:
   `ACTIVITY_MAX_DAY_BYTES` (50Mi) failed sign-ins are kept only in the application log.
 - `GET /api/me` returns the signed-in user; `POST /auth/logout` signs out (and returns the
   provider's logout URL when there is one). Audit events record the method as
-  `runwarden.auth.method`.
+  `ward.auth.method`.
 
 **Sessions** are kept on the server (`DATA_DIR/sessions.json`, stored as hashes of the cookie
 tokens, so the file cannot be used to sign in) and survive restarts. The cookie holds only a
@@ -371,7 +371,7 @@ first admins and for emergencies:
   that name) and has the devops role;
 - at every start a new random password is written to `DATA_DIR/initial-admin-password` (mode
   0600). It is never logged; the log names only the file:
-  `kubectl exec deploy/runwarden -- cat /var/lib/runwarden/initial-admin-password`;
+  `kubectl exec deploy/ward -- cat /var/lib/ward/initial-admin-password`;
 - it is the only way to make the first admin: in the Admin area it gives the devops role to the
   first user (who may not have signed in yet), who then sets up roles and rules for everyone else;
 - set `INITIAL_ADMIN=false` (or remove it) once a devops user can sign in: the file is deleted,
@@ -380,19 +380,19 @@ first admins and for emergencies:
   warns at start if nobody has it;
 - it may be the only method (`AUTH_METHODS` empty) to set up a new installation.
 
-The signed-in user is passed to scripts as `RUNWARDEN_USER`.
+The signed-in user is passed to scripts as `WARD_USER`.
 
 ### Local identity providers
 
-`deploy/dev/compose.yaml` starts Keycloak (`http://localhost:8180`, realm `runwarden`) and
+`deploy/dev/compose.yaml` starts Keycloak (`http://localhost:8180`, realm `ward`) and
 OpenLDAP (`ldap://localhost:1389`) with test users `alice` (group `ops`) and `bob`.
 `deploy/dev/test-auth.sh` starts them, runs the auth integration tests and stops them again.
 
 ```bash
 docker compose -f deploy/dev/compose.yaml up -d
 AUTH_METHODS=oidc PUBLIC_URL=http://localhost:8080 SESSION_KEY=$(openssl rand -base64 32) \
-  OIDC_ISSUER_URL=http://localhost:8180/realms/runwarden OIDC_CLIENT_ID=runwarden \
-  OIDC_CLIENT_SECRET=dev-client-secret RUNNERS_DIR=examples/runners go run ./cmd/runwarden
+  OIDC_ISSUER_URL=http://localhost:8180/realms/ward OIDC_CLIENT_ID=ward \
+  OIDC_CLIENT_SECRET=dev-client-secret RUNNERS_DIR=examples/runners go run ./cmd/ward
 # open http://localhost:8080, choose "Single sign-on" and sign in as alice / alice-password
 ```
 
@@ -434,7 +434,7 @@ What each access allows:
 
 Users always see and control (input, stop, kill) their own runs; viewers cannot control other
 users' runs (`403`); devops can. A run's environments are recorded with it (and in its audit
-events as `runwarden.environments`). Scripts and runs a user may not see answer `404`; a start
+events as `ward.environments`). Scripts and runs a user may not see answer `404`; a start
 refused by the rules answers `403` with the reason. Changes apply at once, without signing in
 again.
 
@@ -463,7 +463,7 @@ the first user, turn the built-in administrator off, and let that user give role
 ## Secrets
 
 Secrets for scripts (API tokens, passwords) are bound to an **environment** and to the **scripts
-that declare them**. Runwarden's own process environment holds none of them.
+that declare them**. Ward's own process environment holds none of them.
 
 - **Where**: `SECRETS_DIR/<environment>/<NAME>` and `SECRETS_DIR/common/<NAME>`, one file per
   secret: the layout of a mounted Kubernetes Secret (Helm `secrets.environments` and
@@ -486,7 +486,7 @@ that declare them**. Runwarden's own process environment holds none of them.
   secrets.
 - **Masking and records**: every secret value is masked in the run's output, history and live
   stream (even when printed), and in dropdown helpers' output. History and audit events record the
-  names only (`runwarden.secrets`); the run page lists them.
+  names only (`ward.secrets`); the run page lists them.
 - **Dropdown helpers** of a script get its secrets for the environment their inputs select (view
   access to it is required anyway).
 - **Rotation**: files are read at every start, so updated Kubernetes Secrets apply without a
@@ -499,7 +499,7 @@ fingerprints only).
 
 ## Kubernetes clusters per environment
 
-Runwarden, not the script, chooses the cluster a run talks to: for a runner with
+Ward, not the script, chooses the cluster a run talks to: for a runner with
 `"kubernetes": true`, choosing the environment *is* choosing the cluster. Concurrent runs in
 different environments never share or overwrite a kube context.
 
@@ -510,14 +510,14 @@ different environments never share or overwrite a kube context.
   environments may share a cluster, each with its own namespace in the context.
 - **File**: YAML or JSON, at most 256 KiB; its `current-context` must exist and is the one
   pinned (other contexts in the file are ignored). Paths in it (certificate files, exec plugin
-  command) must be absolute or a command on `PATH`. Runwarden treats the file as opaque and never
+  command) must be absolute or a command on `PATH`. Ward treats the file as opaque and never
   logs it; whatever its exec plugin needs (e.g. `kubelogin` with a service principal's client id
   and secret) comes from the same environment's *Secrets* as ordinary environment variables, so
   declare them in the runner's `secrets`.
-- **Run**: Runwarden writes the kubeconfig to the run's private HOME (`$KUBECONFIG`, mode 0600)
+- **Run**: Ward writes the kubeconfig to the run's private HOME (`$KUBECONFIG`, mode 0600)
   with the context renamed to the environment name, and sets
-  `RUNWARDEN_KUBE_CONTEXT=<environment>`. A run with a `source` environment gets both contexts,
-  the target current, and `RUNWARDEN_KUBE_SOURCE_CONTEXT=<source>`. Dropdown helpers get the
+  `WARD_KUBE_CONTEXT=<environment>`. A run with a `source` environment gets both contexts,
+  the target current, and `WARD_KUBE_SOURCE_CONTEXT=<source>`. Dropdown helpers get the
   cluster of the environment their inputs select (none before one is chosen). Runners without the
   flag get no kubeconfig. Needs `RUN_HOME=per-run`.
 - **Missing**: an environment without a usable kubeconfig refuses such runs (`409`, audited); a
@@ -533,14 +533,14 @@ different environments never share or overwrite a kube context.
 
 Migrating a script: drop `az aks get-credentials` (and the `az login` it needed), set
 `"kubernetes": true` in its runner config and use `kubectl` as is, or
-`kubectl --context "$RUNWARDEN_KUBE_SOURCE_CONTEXT"` for the source cluster. Calling
+`kubectl --context "$WARD_KUBE_SOURCE_CONTEXT"` for the source cluster. Calling
 `get-credentials` still works, but it only changes the run's private copy; it is deprecated.
 
 ```bash
 # Ops, per environment: a kubeconfig that logs in with the environment's service principal
 az aks get-credentials -g rg-prod -n aks-prod -f config
 kubelogin convert-kubeconfig -l spn --kubeconfig config   # reads AAD_SERVICE_PRINCIPAL_CLIENT_ID/_SECRET
-kubectl create secret generic runwarden-kube-production --from-file=config
+kubectl create secret generic ward-kube-production --from-file=config
 ```
 
 ## API
@@ -603,51 +603,51 @@ stored under `DATA_DIR/history/<run-id>/` (`meta.json`, `output.log`, `files/`).
 
 ### Images
 
-`ghcr.io/catalinmuraru/runwarden` is the generic base image (`linux/amd64`, `linux/arm64`):
-Debian slim with `bash`, the Runwarden binary (UI included) and `tini` as PID 1. It runs as uid
+`ghcr.io/catalinmuraru/ward` is the generic base image (`linux/amd64`, `linux/arm64`):
+Debian slim with `bash`, the Ward binary (UI included) and `tini` as PID 1. It runs as uid
 10001 and expects:
 
 | Path | Purpose |
 |---|---|
-| `/runwarden/runners` | runner configs (`RUNNERS_DIR`), not readable by sandboxed runs |
-| `/opt/runwarden` | scripts; relative paths in configs resolve here (`BASE_DIR`) |
-| `/var/lib/runwarden` | run history (`DATA_DIR`) — mount a volume |
-| `/home/runwarden`, `/tmp` | writable scratch space when the root filesystem is read-only |
+| `/ward/runners` | runner configs (`RUNNERS_DIR`), not readable by sandboxed runs |
+| `/opt/ward` | scripts; relative paths in configs resolve here (`BASE_DIR`) |
+| `/var/lib/ward` | run history (`DATA_DIR`) — mount a volume |
+| `/home/ward`, `/tmp` | writable scratch space when the root filesystem is read-only |
 
 Put your scripts, the tools they need and the runner configs into an image built on top of it,
-so tool and script updates stay separate from Runwarden updates
+so tool and script updates stay separate from Ward updates
 ([examples/Dockerfile](examples/Dockerfile)):
 
 ```dockerfile
-FROM ghcr.io/catalinmuraru/runwarden:0.1.0
+FROM ghcr.io/catalinmuraru/ward:0.5.0
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends curl jq && rm -rf /var/lib/apt/lists/*
 USER 10001:10001
-COPY runners/ /runwarden/runners/
-COPY scripts/ /opt/runwarden/scripts/
+COPY runners/ /ward/runners/
+COPY scripts/ /opt/ward/scripts/
 ```
 
 ### Helm chart
 
 ```bash
-kubectl create secret generic runwarden-env \
+kubectl create secret generic ward-env \
   --from-literal=SESSION_KEY="$(openssl rand -base64 32)" \
   --from-literal=GITLAB_CLIENT_SECRET=...
 # Script secrets: one Secret per environment (see "Secrets"), e.g.
-kubectl create secret generic runwarden-secrets-production --from-literal=DB_PASSWORD=...
+kubectl create secret generic ward-secrets-production --from-literal=DB_PASSWORD=...
 
-helm install runwarden oci://ghcr.io/catalinmuraru/charts/runwarden \
+helm install ward oci://ghcr.io/catalinmuraru/charts/ward \
   --set image.repository=registry.example.com/my-scripts --set image.tag=1.0.0 \
-  --set auth.publicUrl=https://runwarden.example.com \
+  --set auth.publicUrl=https://ward.example.com \
   --set auth.gitlab.url=https://gitlab.example.com --set auth.gitlab.clientId=... \
-  --set existingSecret=runwarden-env \
-  --set secrets.environments.production=runwarden-secrets-production   --set kube.environments.production=runwarden-kube-production \
-  --set ingress.enabled=true --set ingress.host=runwarden.example.com
+  --set existingSecret=ward-env \
+  --set secrets.environments.production=ward-secrets-production   --set kube.environments.production=ward-kube-production \
+  --set ingress.enabled=true --set ingress.host=ward.example.com
 ```
 
-See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highlights:
+See [values.yaml](deploy/helm/ward/values.yaml) for every setting. Highlights:
 
-- **One replica, `Recreate` strategy**: running scripts live in the Runwarden process.
+- **One replica, `Recreate` strategy**: running scripts live in the Ward process.
 - **Secrets only from `existingSecret`**: the chart never renders secret values.
 - **Hardened pod**: non-root, read-only root filesystem, all capabilities dropped,
   `RuntimeDefault` seccomp, no service account token unless `serviceAccount.automountToken`.
@@ -659,9 +659,9 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
 - **Audit**: set `trustedProxies` to your ingress/load-balancer networks so audit events record
   the real client address; ship the pod log with Filebeat (see *Logs and audit trail*).
 - **Retention**: `history.maxAge` (default `90d`) and `history.maxRuns`.
-- **Workspace**: `workspace.enabled` adds a persistent volume at `/var/lib/runwarden-work`
+- **Workspace**: `workspace.enabled` adds a persistent volume at `/var/lib/ward-work`
   (`WORKSPACE_DIR`) for flows that keep files between runs: one private directory per user
-  (`$RUNWARDEN_WORKSPACE`) and `shared` (`$RUNWARDEN_SHARED`, read-only for runs).
+  (`$WARD_WORKSPACE`) and `shared` (`$WARD_SHARED`, read-only for runs).
 - **Isolation**: `isolation.mode` (default `required`: the pod does not start without a working
   Landlock sandbox; `auto` falls back to unsandboxed runs with a warning), `isolation.readPaths`,
   `isolation.writePaths` and `isolation.maxProcs` (see *Isolation between runs*). The Admin
@@ -680,27 +680,65 @@ See [values.yaml](deploy/helm/runwarden/values.yaml) for every setting. Highligh
   for your GitLab, `auth.gitlab.requiredGroup`, `auth.initialAdmin`. `[none]` must be confirmed with
   `auth.allowNoAuth: true`. (`auth.type` was replaced by `auth.methods`; the chart says so.)
 - **Secrets**: `secrets.common` and `secrets.environments` (environment → Secret name), mounted
-  read-only (0440) under `/runwarden/secrets/`; kubeconfigs under `/runwarden/kube/`.
+  read-only (0440) under `/ward/secrets/`; kubeconfigs under `/ward/kube/`.
 - **Access**: `policy.environments`, `policy.unknownEnvironment` and `policy.maxExceptionDays`.
   The first devops user is made by the built-in administrator (`auth.initialAdmin`);
   `auth.adminUsers` and `auth.adminGroups` were removed (the chart fails with a hint).
 - `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` for anything scripts need
   (e.g. an SSH key from a Secret).
 
+#### Upgrading to v0.5 (renamed to Ward)
+
+v0.5 renames the project from Runwarden to Ward: image `ghcr.io/catalinmuraru/ward`, chart
+`oci://ghcr.io/catalinmuraru/charts/ward`, binary `ward`, paths `/ward/...`, `/var/lib/ward`,
+`/var/lib/ward-work`, `/opt/ward` and `/home/ward`. The old image and chart get no more releases.
+
+The chart name is part of the resource names and selector labels, so `helm upgrade` from the
+`runwarden` chart fails. Reinstall under the new name and reuse the volumes (the chart keeps
+its PersistentVolumeClaims on uninstall unless `keepOnUninstall: false` was set; check with
+`kubectl get pvc` first):
+
+```bash
+helm uninstall runwarden -n <ns>          # PVCs "runwarden" and "runwarden-workspace" stay
+helm install ward oci://ghcr.io/catalinmuraru/charts/ward --version 0.5.0 -n <ns> \
+  -f values.yaml \
+  --set persistence.existingClaim=runwarden \
+  --set workspace.existingClaim=runwarden-workspace
+# executors: executors.<env>.workspace.existingClaim=runwarden-executor-<env>-workspace
+```
+
+Executor tokens generated by the chart are new after the reinstall; executors installed
+elsewhere with `token.existingSecret` keep theirs. Images built on the base image must move
+their files: runner configs to `/ward/runners/`, scripts to `/opt/ward/`.
+
+Kept for v0.5 only (each logs a deprecation warning once), removed in v0.6:
+- `RUNWARDEN_*` variables are read when the `WARD_*` one is unset.
+- Scripts get `WARD_USER`, `WARD_WORKSPACE`, `WARD_SHARED`, `WARD_KUBE_CONTEXT` and
+  `WARD_KUBE_SOURCE_CONTEXT` under their old `RUNWARDEN_*` names too: rename them in scripts.
+- Without `SECRETS_DIR`/`KUBE_DIR`, `/runwarden/secrets` and `/runwarden/kube` are used when
+  only those exist.
+- v0.5 servers accept v0.4 executors and the other way round, so they can be upgraded in any order.
+
+Changed without a fallback:
+- Everyone signs in once more (the session cookie is now `ward_session`).
+- Logs: `event.dataset` is `ward.audit` / `ward.app`, `service.name` is `ward`, and custom
+  fields are under `ward.` instead of `runwarden.`; update saved searches, dashboards and alerts.
+- Browser settings (theme, notifications, open groups) move over on the first page load.
+
 #### Upgrading to the run sandbox
 
 The chart turns on `isolation.mode: required` and moves its mounts out of `/etc`, because
 Landlock has no deny rules and every run may read `/etc`:
 
-- Runner configs, secrets, kubeconfigs and the HOME skeleton are now under `/runwarden/`
-  (`RUNNERS_DIR=/runwarden/runners`, `SECRETS_DIR=/runwarden/secrets`, `KUBE_DIR=/runwarden/kube`).
-  Images built on the base image must `COPY` their runner configs to `/runwarden/runners/`;
-  values that mount files under `/etc/runwarden/...` through `extraVolumeMounts` must move them.
-  Runwarden refuses to sandbox runs (and with `required`, to start) while `DATA_DIR`,
+- Runner configs, secrets, kubeconfigs and the HOME skeleton are now under `/ward/`
+  (`RUNNERS_DIR=/ward/runners`, `SECRETS_DIR=/ward/secrets`, `KUBE_DIR=/ward/kube`).
+  Images built on the base image must `COPY` their runner configs to `/ward/runners/`;
+  values that mount files under `/etc/ward/...` through `extraVolumeMounts` must move them.
+  Ward refuses to sandbox runs (and with `required`, to start) while `DATA_DIR`,
   `SECRETS_DIR`, `KUBE_DIR` or `WORKSPACE_DIR` lies below a path every run can read.
-- The workspace is per user: `$RUNWARDEN_WORKSPACE` is `/var/lib/runwarden-work/<user>`. Move
+- The workspace is per user: `$WARD_WORKSPACE` is `/var/lib/ward-work/<user>`. Move
   files scripts still need into the users' directories, and team tools into
-  `/var/lib/runwarden-work/shared` (e.g. with `kubectl exec`); runs can only read `shared`.
+  `/var/lib/ward-work/shared` (e.g. with `kubectl exec`); runs can only read `shared`.
 - Scripts may write only their HOME, `$TMPDIR` and their workspace: replace hard-coded `/tmp`
   paths with `$TMPDIR`, or allow a path for all runs with `isolation.writePaths`.
 - A node kernel without Landlock (before 5.13, or with the LSM disabled) fails the start with
@@ -708,9 +746,9 @@ Landlock has no deny rules and every run may read `/etc`:
 
 #### Executors per environment
 
-By default the Runwarden pod runs every script itself. An environment listed under `executors`
+By default the Ward pod runs every script itself. An environment listed under `executors`
 runs its scripts and dropdown helpers in a Deployment of its own, `<release>-executor-<environment>`
-(same image, `runwarden executor`):
+(same image, `ward executor`):
 
 ```yaml
 executors:
@@ -719,7 +757,7 @@ executors:
     workspace:
       enabled: true
       storageClass: azurefile-csi   # ReadWriteMany: every replica mounts the same volume
-    existingSecret: runwarden-env-production   # RUNNER_ENV_* for production scripts
+    existingSecret: ward-env-production   # RUNNER_ENV_* for production scripts
     egress:                                     # with networkPolicy.enabled
       - to: [{ipBlock: {cidr: 10.30.0.0/16}}]
 ```
@@ -770,7 +808,7 @@ executors:
    `RUNNER_ENV_*` variables (`existingSecret` / `extraEnv`), egress rules (`egress`), extra
    volumes (`extraVolumes` / `extraVolumeMounts`).
 3. If its scripts use the workspace, enable `workspace` for the executor and copy the files
-   from the server's workspace (`/var/lib/runwarden-work/<user>` and `shared`) into the new
+   from the server's workspace (`/var/lib/ward-work/<user>` and `shared`) into the new
    volume, e.g. with `kubectl cp`.
 4. `helm upgrade`: the server restarts without the environment's mounts, and the environment's
    runs start again once an executor is connected (Admin area > Secrets > Executors).
@@ -786,7 +824,7 @@ concurrent run's files, environment or memory, an environment runs on two execut
 
 Pushing a tag `vX.Y.Z` on `main` builds and publishes the multi-arch image
 (`X.Y.Z`, `X.Y`, `latest`, with SBOM and provenance) and the Helm chart
-(`oci://ghcr.io/catalinmuraru/charts/runwarden`, version `X.Y.Z`).
+(`oci://ghcr.io/catalinmuraru/charts/ward`, version `X.Y.Z`).
 
 Patch releases are also cut automatically every Tuesday: if `main` has commits since the latest
 `vX.Y.Z` tag and CI on `main` is green, the auto patch release workflow tags `vX.Y.(Z+1)` and
@@ -803,10 +841,10 @@ be started by hand from the Actions tab. Minor and major releases stay manual ta
 - Script secrets are bound to environments and scripts: a run gets only the secrets its config
   declares, of the environment it may run in; they are masked in output, history and audit, which
   record only their names.
-- Runs get the kubeconfig of their environment only, chosen by Runwarden.
+- Runs get the kubeconfig of their environment only, chosen by Ward.
 - With executors, an environment's secrets and kubeconfig exist only in its own executor pods,
   which connect out to the server with a per-environment token (stored as a SHA-256 hash).
-- With Landlock (`ISOLATION`), runs cannot read Runwarden's data, secrets or kubeconfigs, other
+- With Landlock (`ISOLATION`), runs cannot read Ward's data, secrets or kubeconfigs, other
   runs' files, environment or memory, or other users' workspaces; with kernel 6.12+ they cannot
   signal other runs. They still see other runs' command lines and share memory and CPU.
 - The container runs as non-root with a read-only root filesystem and no capabilities.
@@ -832,7 +870,7 @@ and Docker plus `kind` for cluster testing.
 cd web && npm ci && npm run build && cd ..
 
 # Run the server on :8080 with the example scripts, without sign-in (local only)
-AUTH_METHODS=none ALLOW_NO_AUTH=true RUNNERS_DIR=examples/runners go run ./cmd/runwarden
+AUTH_METHODS=none ALLOW_NO_AUTH=true RUNNERS_DIR=examples/runners go run ./cmd/ward
 
 # UI with hot reload on :5173, proxying /api and /auth to the server above
 cd web && npm run dev
@@ -845,8 +883,8 @@ go test -race ./...
 golangci-lint run
 govulncheck ./...
 cd web && npm ci && npm test && npm run build
-helm lint --strict deploy/helm/runwarden --set 'auth.methods={none}',auth.allowNoAuth=true
-docker build -t runwarden .   # CI also scans the image with Trivy
+helm lint --strict deploy/helm/ward --set 'auth.methods={none}',auth.allowNoAuth=true
+docker build -t ward .   # CI also scans the image with Trivy
 ```
 
 Security checks in CI: CodeQL, govulncheck, gosec (in golangci-lint), Trivy (image and
@@ -858,7 +896,7 @@ Without a UI build the binary still compiles; `/` then answers 503 with a hint.
 ## Project layout
 
 ```
-cmd/runwarden/     entry point and check-config command
+cmd/ward/     entry point and check-config command
 internal/config/   runner config loader
 internal/params/   parameter model, validation, argument/env/stdin building
 internal/executor/ process lifecycle, output, stdin, limits
@@ -890,5 +928,5 @@ and the UI shell.
 
 ## License
 
-Runwarden is free software, licensed under the GNU General Public License v3.0 or later. See
+Ward is free software, licensed under the GNU General Public License v3.0 or later. See
 [LICENSE](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).

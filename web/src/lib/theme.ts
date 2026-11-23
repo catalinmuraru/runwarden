@@ -4,7 +4,7 @@ import type { Theme } from '../api'
 
 export const themes: readonly Theme[] = ['system', 'light', 'dark']
 
-const storageKey = 'runwarden.theme'
+const storageKey = 'ward.theme'
 
 const isTheme = (v: unknown): v is Theme => themes.includes(v as Theme)
 

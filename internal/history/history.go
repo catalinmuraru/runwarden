@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/executor"
+	"github.com/catalinmuraru/ward/internal/executor"
 )
 
 // StatusInterrupted marks runs that were still running when the server stopped.

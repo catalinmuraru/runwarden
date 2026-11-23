@@ -18,4 +18,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/catalinmuraru/runwarden
+        - github.com/catalinmuraru/ward

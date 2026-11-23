@@ -18,8 +18,8 @@ try other-workspace-write touch "$base/ws/bob/evil"
 try shared-write touch "$base/ws/shared/evil"
 try own-home sh -c 'echo x > "$HOME/f" && cat "$HOME/f"'
 try own-tmp sh -c 'echo x > "$TMPDIR/f" && cat "$TMPDIR/f"'
-try own-workspace sh -c 'echo x > "$RUNWARDEN_WORKSPACE/f" && cat "$RUNWARDEN_WORKSPACE/f"'
-try shared-read cat "$RUNWARDEN_SHARED/tool"
+try own-workspace sh -c 'echo x > "$WARD_WORKSPACE/f" && cat "$WARD_WORKSPACE/f"'
+try shared-read cat "$WARD_SHARED/tool"
 try process-substitution bash -c 'cat <(echo hi)'
 try own-children bash -c 'sleep 5 & kill $!'
 echo "attacks done"

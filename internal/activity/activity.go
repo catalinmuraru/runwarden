@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/audit"
+	"github.com/catalinmuraru/ward/internal/audit"
 )
 
 const (

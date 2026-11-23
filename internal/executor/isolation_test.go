@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/sandbox"
 )
 
-// The test binary doubles as the trampoline, as runwarden does.
+// The test binary doubles as the trampoline, as ward does.
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "sandbox-exec" {
 		os.Exit(sandbox.Main(os.Args[2:]))
@@ -61,7 +61,7 @@ func testSandbox(t *testing.T) (*Sandbox, func(file string) *config.Script) {
 	}
 }
 
-// isolationSetup lays out Runwarden's data, secrets and workspaces under one base directory.
+// isolationSetup lays out Ward's data, secrets and workspaces under one base directory.
 func isolationSetup(t *testing.T) (base string, env EnvPolicy) {
 	t.Helper()
 	base = t.TempDir()
@@ -228,7 +228,7 @@ func TestWorkspaceEnv(t *testing.T) {
 	r := mustStart(t, e, Request{Script: testScript(t, "args.sh"), User: "Alice"})
 	waitDone(t, r)
 	out := outputOf(r)
-	for _, want := range []string{"env:RUNWARDEN_WORKSPACE=" + filepath.Join(root, "alice"), "env:RUNWARDEN_SHARED=" + filepath.Join(root, "shared")} {
+	for _, want := range []string{"env:WARD_WORKSPACE=" + filepath.Join(root, "alice"), "env:WARD_SHARED=" + filepath.Join(root, "shared")} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

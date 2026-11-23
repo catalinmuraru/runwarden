@@ -27,7 +27,7 @@ func TestECSHandler(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(NewECSHandler(&buf, "v1.2.3", slog.LevelDebug))
 	log.With("component", "executor").Warn("run started", "run", "r1", "err", errors.New("boom"))
-	log.Info("custom event", slog.Group("event", slog.String("dataset", "runwarden.audit")), slog.Group("user", slog.String("name", "alice")))
+	log.Info("custom event", slog.Group("event", slog.String("dataset", "ward.audit")), slog.Group("user", slog.String("name", "alice")))
 
 	lines := decode(t, &buf)
 	first := lines[0]
@@ -47,19 +47,19 @@ func TestECSHandler(t *testing.T) {
 		}
 	}
 	svc, _ := first["service"].(map[string]any)
-	if svc["name"] != "runwarden" || svc["version"] != "v1.2.3" {
+	if svc["name"] != "ward" || svc["version"] != "v1.2.3" {
 		t.Errorf("service = %v", svc)
 	}
-	custom, _ := first["runwarden"].(map[string]any)
+	custom, _ := first["ward"].(map[string]any)
 	if custom["run"] != "r1" || custom["component"] != "executor" {
-		t.Errorf("custom fields not under runwarden: %v", first)
+		t.Errorf("custom fields not under ward: %v", first)
 	}
-	if ev, _ := first["event"].(map[string]any); ev["dataset"] != "runwarden.app" {
+	if ev, _ := first["event"].(map[string]any); ev["dataset"] != "ward.app" {
 		t.Errorf("app event.dataset = %v", first["event"])
 	}
 
 	second := lines[1]
-	if ev, _ := second["event"].(map[string]any); ev["dataset"] != "runwarden.audit" {
+	if ev, _ := second["event"].(map[string]any); ev["dataset"] != "ward.audit" {
 		t.Errorf("explicit event group replaced: %v", second["event"])
 	}
 	if u, _ := second["user"].(map[string]any); u["name"] != "alice" {

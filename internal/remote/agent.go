@@ -18,12 +18,13 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/kube"
-	"github.com/catalinmuraru/runwarden/internal/params"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
-	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/ward/internal/compat"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/kube"
+	"github.com/catalinmuraru/ward/internal/params"
+	"github.com/catalinmuraru/ward/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/secrets"
 )
 
 const (
@@ -37,7 +38,7 @@ const (
 // Agent is the executor side: it keeps one connection to the server and runs what arrives on
 // it with Exec, for one environment.
 type Agent struct {
-	URL         string // server base URL, e.g. http://runwarden:8080
+	URL         string // server base URL, e.g. http://ward:8080
 	Token       string
 	Environment string
 	Pod         string
@@ -159,6 +160,7 @@ func (a *Agent) session(ctx context.Context) error {
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+a.Token)
 	header.Set(EnvironmentHeader, a.Environment)
+	header.Set(compat.LegacyEnvironmentHeader, a.Environment) // v0.5: servers that predate the rename
 	dctx, cancel := context.WithTimeout(ctx, helloTimeout)
 	ws, resp, err := websocket.Dial(dctx, strings.TrimSuffix(a.URL, "/")+Path, &websocket.DialOptions{HTTPHeader: header, HTTPClient: a.HTTPClient})
 	cancel()

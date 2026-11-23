@@ -58,7 +58,7 @@ async function logout() {
 <template>
   <aside class="sidebar" aria-label="Scripts">
     <div class="sidebar-head">
-      <RouterLink to="/" class="brand">Runwarden</RouterLink>
+      <RouterLink to="/" class="brand">Ward</RouterLink>
       <label class="sr-only" for="sidebar-search">Search scripts</label>
       <input id="sidebar-search" v-model="filter" type="search" placeholder="Search…" autocomplete="off" />
     </div>

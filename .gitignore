@@ -1,5 +1,5 @@
 # Go
-/runwarden
+/ward
 /bin/
 *.test
 *.out

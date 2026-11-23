@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // Script is one runnable script, parsed and validated from a runner config.

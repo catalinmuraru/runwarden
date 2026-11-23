@@ -59,16 +59,16 @@ func TestRunEndEvent(t *testing.T) {
 	if process["exit_code"] != float64(3) || process["args"].([]any)[1] != "******" {
 		t.Errorf("process = %v", process)
 	}
-	rw := e["runwarden"].(map[string]any)
+	rw := e["ward"].(map[string]any)
 	run := rw["run"].(map[string]any)
 	if run["id"] != "r1" || run["status"] != "failed" || run["parameters"] != `{"Name":"x","Token":"******"}` {
-		t.Errorf("runwarden.run = %v", run)
+		t.Errorf("ward.run = %v", run)
 	}
 	if g := rw["auth"].(map[string]any)["groups"].([]any); g[0] != "ops" || rw["environments"].([]any)[0] != "production" {
-		t.Errorf("runwarden.auth / environments = %v", rw)
+		t.Errorf("ward.auth / environments = %v", rw)
 	}
 	if rw["script"].(map[string]any)["name"] != "Backup" {
-		t.Errorf("runwarden.script = %v", rw["script"])
+		t.Errorf("ward.script = %v", rw["script"])
 	}
 }
 
@@ -80,7 +80,7 @@ func TestSuccessIsInfoAndOmitsEmptyFields(t *testing.T) {
 	if e["level"] != "INFO" || e["event"].(map[string]any)["outcome"] != "success" || e["msg"] != "logout success" {
 		t.Errorf("event = %v", e)
 	}
-	for _, absent := range []string{"process", "source", "runwarden", "user_agent"} {
+	for _, absent := range []string{"process", "source", "ward", "user_agent"} {
 		if _, ok := e[absent]; ok {
 			t.Errorf("%s should be omitted when empty", absent)
 		}

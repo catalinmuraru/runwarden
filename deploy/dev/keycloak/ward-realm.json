@@ -1,10 +1,10 @@
 {
-  "realm": "runwarden",
+  "realm": "ward",
   "enabled": true,
   "groups": [{ "name": "ops" }],
   "clients": [
     {
-      "clientId": "runwarden",
+      "clientId": "ward",
       "enabled": true,
       "publicClient": false,
       "secret": "dev-client-secret",

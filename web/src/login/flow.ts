@@ -15,7 +15,7 @@ const messages: Record<string, string> = {
   refused: 'Sign-in was cancelled or refused by the identity provider.',
   failed: 'Sign-in failed. Please try again.',
   throttled: 'Too many failed sign-ins. Try again later.',
-  'not-member': 'Your account is not allowed to use Runwarden. Ask an administrator for access.',
+  'not-member': 'Your account is not allowed to use Ward. Ask an administrator for access.',
   unavailable: 'Sign-in is unavailable right now. Try again later.',
   'unknown-method': 'That sign-in method is not available.',
 }

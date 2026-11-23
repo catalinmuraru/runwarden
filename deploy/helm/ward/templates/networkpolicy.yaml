@@ -2,13 +2,13 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "runwarden.fullname" . }}
+  name: {{ include "ward.fullname" . }}
   labels:
-    {{- include "runwarden.labels" . | nindent 4 }}
+    {{- include "ward.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "runwarden.selectorLabels" . | nindent 6 }}
+      {{- include "ward.selectorLabels" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
     - ports:

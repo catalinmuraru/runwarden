@@ -1,13 +1,13 @@
 # Values for the local kind test: the examples image plus kubectl and a test runner, loaded
 # into the cluster, no sign-in.
 image:
-  repository: runwarden-e2e
+  repository: ward-e2e
   tag: dev
   pullPolicy: Never
 auth:
   methods: [none]
   allowNoAuth: true
-existingSecret: runwarden-env
+existingSecret: ward-env
 limits:
   runTimeout: 10m
 persistence:
@@ -19,13 +19,13 @@ workspace:
   keepOnUninstall: false
 # Created by deploy/kind/test.sh; acceptance has none on purpose (missing-secret check).
 secrets:
-  common: runwarden-secrets-common
+  common: ward-secrets-common
   environments:
-    development: runwarden-secrets-development
-    production: runwarden-secrets-production
+    development: ward-secrets-development
+    production: ward-secrets-production
 # Kubeconfigs of three ServiceAccounts, one namespace each (created by deploy/kind/test.sh).
 kube:
   environments:
-    development: runwarden-kube-development
-    acceptance: runwarden-kube-acceptance
-    production: runwarden-kube-production
+    development: ward-kube-development
+    acceptance: ward-kube-acceptance
+    production: ward-kube-production

@@ -3,7 +3,7 @@ import { reactive } from 'vue'
 import type { RunMeta } from '../api'
 import { statusLabel } from './format'
 
-const storageKey = 'runwarden.notify'
+const storageKey = 'ward.notify'
 
 function readPref(): boolean {
   try {

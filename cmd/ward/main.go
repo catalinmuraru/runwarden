@@ -1,4 +1,4 @@
-// Command runwarden serves a web UI to run scripts with parameters, live output and history.
+// Command ward serves a web UI to run scripts with parameters, live output and history.
 package main
 
 import (
@@ -15,23 +15,23 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/activity"
-	"github.com/catalinmuraru/runwarden/internal/api"
-	"github.com/catalinmuraru/runwarden/internal/audit"
-	"github.com/catalinmuraru/runwarden/internal/auth"
-	"github.com/catalinmuraru/runwarden/internal/authz"
-	"github.com/catalinmuraru/runwarden/internal/clientip"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/history"
-	"github.com/catalinmuraru/runwarden/internal/kube"
-	"github.com/catalinmuraru/runwarden/internal/logging"
-	"github.com/catalinmuraru/runwarden/internal/policy"
-	"github.com/catalinmuraru/runwarden/internal/remote"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
-	"github.com/catalinmuraru/runwarden/internal/secrets"
-	"github.com/catalinmuraru/runwarden/internal/settings"
-	"github.com/catalinmuraru/runwarden/internal/web"
+	"github.com/catalinmuraru/ward/internal/activity"
+	"github.com/catalinmuraru/ward/internal/api"
+	"github.com/catalinmuraru/ward/internal/audit"
+	"github.com/catalinmuraru/ward/internal/auth"
+	"github.com/catalinmuraru/ward/internal/authz"
+	"github.com/catalinmuraru/ward/internal/clientip"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/history"
+	"github.com/catalinmuraru/ward/internal/kube"
+	"github.com/catalinmuraru/ward/internal/logging"
+	"github.com/catalinmuraru/ward/internal/policy"
+	"github.com/catalinmuraru/ward/internal/remote"
+	"github.com/catalinmuraru/ward/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/secrets"
+	"github.com/catalinmuraru/ward/internal/settings"
+	"github.com/catalinmuraru/ward/internal/web"
 )
 
 // version is set at build time (-ldflags "-X main.version=v1.2.3").
@@ -55,7 +55,7 @@ func main() {
 
 	slog.SetDefault(slog.New(logging.NewECSHandler(os.Stdout, version, slog.LevelInfo)))
 	if err := run(); err != nil {
-		slog.Error("runwarden stopped", "err", err)
+		slog.Error("ward stopped", "err", err)
 		os.Exit(1)
 	}
 }

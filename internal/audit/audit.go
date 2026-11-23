@@ -1,5 +1,5 @@
 // Package audit records who did what and with which result, as ECS events
-// (event.dataset "runwarden.audit") in the application log. Secure values are always masked by
+// (event.dataset "ward.audit") in the application log. Secure values are always masked by
 // the caller; passwords never reach this package.
 package audit
 
@@ -12,7 +12,7 @@ import (
 )
 
 // Dataset is the ECS event.dataset of audit events.
-const Dataset = "runwarden.audit"
+const Dataset = "ward.audit"
 
 // Actions.
 const (
@@ -41,7 +41,7 @@ type Event struct {
 	Message  string
 
 	User       string
-	Roles      []string // Runwarden roles (ECS user.roles)
+	Roles      []string // Ward roles (ECS user.roles)
 	Groups     []string // groups from the identity provider: shown, never grant rights
 	AuthMethod string   // how the user signed in: gitlab, oidc, ldap or local
 	SourceIP   string
@@ -153,7 +153,7 @@ func Log(ctx context.Context, e Event) {
 		custom = append(custom, slog.Group("policy", slog.String("object", e.PolicyObject), slog.String("change", e.PolicyChange)))
 	}
 	if len(custom) > 0 {
-		attrs = append(attrs, slog.Group("runwarden", custom...))
+		attrs = append(attrs, slog.Group("ward", custom...))
 	}
 
 	msg := e.Message

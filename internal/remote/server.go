@@ -18,8 +18,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/kube"
+	"github.com/catalinmuraru/ward/internal/compat"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/kube"
 )
 
 // LostNotice is appended to the output of a run whose executor connection was lost.
@@ -95,7 +96,7 @@ func (h *Hub) authorized(env, header string) bool {
 
 // ServeHTTP accepts one executor connection and serves it until it closes.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	env := r.Header.Get(EnvironmentHeader)
+	env := compat.Header(r.Header.Get, EnvironmentHeader, compat.LegacyEnvironmentHeader)
 	if !h.authorized(env, r.Header.Get("Authorization")) {
 		logger().Warn("executor refused: bad token or unknown environment", "environment", env, "remote", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)

@@ -29,7 +29,7 @@ export function filterScripts(list: ScriptSummary[], query: string): ScriptSumma
   return list.filter((s) => `${s.name} ${s.group ?? ''} ${s.description ?? ''} ${(s.tags ?? []).join(' ')}`.toLowerCase().includes(q))
 }
 
-const openKey = 'runwarden.groups'
+const openKey = 'ward.groups'
 
 /** The sidebar groups the user left open. */
 export function savedOpenGroups(): Set<string> {

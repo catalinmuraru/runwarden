@@ -11,7 +11,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/ward/internal/config"
 )
 
 // OIDCProvider signs users in with the OpenID Connect authorization code flow and PKCE.
@@ -26,7 +26,7 @@ type OIDCProvider struct {
 	logoutURL     string
 }
 
-// NewOIDC discovers the issuer's endpoints. redirectURL is Runwarden's /auth/callback.
+// NewOIDC discovers the issuer's endpoints. redirectURL is Ward's /auth/callback.
 func NewOIDC(ctx context.Context, cfg config.OIDC, redirectURL, publicURL string) (*OIDCProvider, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	ctx = oidc.ClientContext(ctx, client)

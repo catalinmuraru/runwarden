@@ -13,7 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/compat"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // Options control how runner configs are loaded.
@@ -283,7 +284,7 @@ func checkSecretName(name string) error {
 		return fmt.Errorf("%q must be an upper-case variable name (A-Z, 0-9, _)", name)
 	case strings.HasPrefix(name, "SOURCE_"):
 		return fmt.Errorf("%q: the SOURCE_ prefix is added for the source environment's secrets", name)
-	case strings.HasPrefix(name, "LD_"), strings.HasPrefix(name, "BASH_"), strings.HasPrefix(name, "RUNWARDEN_"):
+	case strings.HasPrefix(name, "LD_"), strings.HasPrefix(name, "BASH_"), strings.HasPrefix(name, "WARD_"), strings.HasPrefix(name, compat.LegacyPrefix):
 		return fmt.Errorf("%q is reserved", name)
 	}
 	switch name {

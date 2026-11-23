@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/catalinmuraru/ward/internal/compat"
 )
 
 // App is the server configuration, read from environment variables.
@@ -36,8 +38,8 @@ type App struct {
 	MaxRunsPerUser    int           // MAX_RUNS_PER_USER, default 1; 0 means no per-user limit
 	RunHome           string        // RUN_HOME: "per-run" (default) or "shared"
 	HomeSkeleton      string        // HOME_SKELETON: directory copied into every per-run HOME
-	SecretsDir        string        // SECRETS_DIR, default "/runwarden/secrets"; <dir>/<environment>/<NAME>
-	KubeDir           string        // KUBE_DIR, default "/runwarden/kube"; <dir>/<environment>/config
+	SecretsDir        string        // SECRETS_DIR, default "/ward/secrets"; <dir>/<environment>/<NAME>
+	KubeDir           string        // KUBE_DIR, default "/ward/kube"; <dir>/<environment>/config
 	WorkspaceDir      string        // WORKSPACE_DIR: per-user workspaces <dir>/<user> and <dir>/shared
 	Isolation         string        // ISOLATION: "auto" (default), "required" or "off"; Landlock per run
 	IsolationRead     []string      // ISOLATION_READ_PATHS: more paths every run may read
@@ -55,7 +57,7 @@ type App struct {
 	Executor       Executor // only in executor mode
 }
 
-// Executor is what `runwarden executor` needs besides the run settings of App.
+// Executor is what `ward executor` needs besides the run settings of App.
 type Executor struct {
 	ServerURL   string // EXECUTOR_SERVER_URL: the server's base URL (http, https, ws or wss)
 	Token       string // EXECUTOR_TOKEN: this environment's executor token
@@ -113,7 +115,7 @@ type Auth struct {
 	Methods      []string
 	NoAuth       bool          // AUTH_METHODS=none (+ ALLOW_NO_AUTH=true): no sign-in, everyone is an admin
 	InitialAdmin bool          // INITIAL_ADMIN: built-in administrator with a generated password
-	PublicURL    string        // PUBLIC_URL, e.g. https://runwarden.example.com
+	PublicURL    string        // PUBLIC_URL, e.g. https://ward.example.com
 	SessionKey   []byte        // SESSION_KEY: 32 bytes, base64
 	SessionTTL   time.Duration // SESSION_TTL, default 12h
 	CookieSecure bool          // COOKIE_SECURE, default true unless PUBLIC_URL is http
@@ -163,7 +165,7 @@ func LoadApp(getenv func(string) string) (App, error) {
 	return load(getenv, false)
 }
 
-// LoadExecutor reads the configuration of `runwarden executor`: the run settings of LoadApp
+// LoadExecutor reads the configuration of `ward executor`: the run settings of LoadApp
 // plus Executor; no sign-in or access policy, which stay on the server. environment, when not
 // empty, overrides EXECUTOR_ENVIRONMENT.
 func LoadExecutor(getenv func(string) string, environment string) (App, error) {
@@ -302,8 +304,8 @@ func load(getenv func(string) string, executorMode bool) (App, error) {
 	if app.RunHome != RunHomePerRun && app.RunHome != RunHomeShared {
 		errs = append(errs, fmt.Errorf("RUN_HOME: unknown value %q (want per-run or shared)", app.RunHome))
 	}
-	app.SecretsDir = dir("SECRETS_DIR", "/runwarden/secrets")
-	app.KubeDir = dir("KUBE_DIR", "/runwarden/kube")
+	app.SecretsDir = dir("SECRETS_DIR", compat.Dir("/ward/secrets", "/runwarden/secrets", compat.DirExists))
+	app.KubeDir = dir("KUBE_DIR", compat.Dir("/ward/kube", "/runwarden/kube", compat.DirExists))
 	if str("WORKSPACE_DIR", "") != "" {
 		app.WorkspaceDir = dir("WORKSPACE_DIR", "")
 	}
@@ -450,7 +452,7 @@ func loadAuth(getenv func(string) string, str func(string, string) string, dur f
 
 	if a.Enabled(AuthGitLab) || a.Enabled(AuthOIDC) {
 		if u, err := url.Parse(str("PUBLIC_URL", "")); err != nil || u.Scheme == "" || u.Host == "" {
-			fail("PUBLIC_URL must be an absolute URL such as https://runwarden.example.com (needed by gitlab and oidc sign-in)")
+			fail("PUBLIC_URL must be an absolute URL such as https://ward.example.com (needed by gitlab and oidc sign-in)")
 		}
 	}
 	scopes := []string{"openid", "profile", "email"}

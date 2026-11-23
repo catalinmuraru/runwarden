@@ -85,23 +85,23 @@ jobs:
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.2
-      - run: helm lint --strict deploy/helm/runwarden --set 'auth.methods={none}',auth.allowNoAuth=true
+      - run: helm lint --strict deploy/helm/ward --set 'auth.methods={none}',auth.allowNoAuth=true
       - name: Render with representative values
         run: |
-          helm template t deploy/helm/runwarden -f deploy/kind/values-kind.yaml >/dev/null
-          helm template t deploy/helm/runwarden --set 'auth.methods={oidc}',existingSecret=s \
+          helm template t deploy/helm/ward -f deploy/kind/values-kind.yaml >/dev/null
+          helm template t deploy/helm/ward --set 'auth.methods={oidc}',existingSecret=s \
             --set auth.publicUrl=https://rw.example.com,auth.oidc.issuerUrl=https://idp,auth.oidc.clientId=rw \
             --set ingress.enabled=true,ingress.host=rw.example.com >/dev/null
-          helm template t deploy/helm/runwarden --set 'auth.methods={ldap}',existingSecret=s,auth.initialAdmin=true \
+          helm template t deploy/helm/ward --set 'auth.methods={ldap}',existingSecret=s,auth.initialAdmin=true \
             --set auth.ldap.url=ldaps://dir,auth.ldap.userBaseDN=dc=example \
             --set-json 'runners.configs={"hello":{"name":"Hello","script_path":"/bin/echo"}}' >/dev/null
-          helm template t deploy/helm/runwarden --set existingSecret=s,auth.publicUrl=https://rw.example.com \
+          helm template t deploy/helm/ward --set existingSecret=s,auth.publicUrl=https://rw.example.com \
             --set auth.gitlab.clientId=rw,networkPolicy.enabled=true,runs.homeSkeletonConfigMap=skel >/dev/null
-          helm template t deploy/helm/runwarden --set 'auth.methods={gitlab,ldap}',existingSecret=s,auth.publicUrl=https://rw.example.com \
+          helm template t deploy/helm/ward --set 'auth.methods={gitlab,ldap}',existingSecret=s,auth.publicUrl=https://rw.example.com \
             --set auth.gitlab.clientId=rw,auth.ldap.url=ldaps://dir,auth.ldap.userBaseDN=dc=example >/dev/null
           # [none] must be confirmed with auth.allowNoAuth; the old auth.type is refused with a hint
-          if helm template t deploy/helm/runwarden --set 'auth.methods={none}' >/dev/null 2>&1; then exit 1; fi
-          if helm template t deploy/helm/runwarden --set auth.type=gitlab,existingSecret=s >/dev/null 2>&1; then exit 1; fi
+          if helm template t deploy/helm/ward --set 'auth.methods={none}' >/dev/null 2>&1; then exit 1; fi
+          if helm template t deploy/helm/ward --set auth.type=gitlab,existingSecret=s >/dev/null 2>&1; then exit 1; fi
 
   docker:
     name: Docker build
@@ -115,20 +115,20 @@ jobs:
         with:
           context: .
           load: true
-          tags: runwarden:ci
+          tags: ward:ci
           build-args: VERSION=ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           no-cache-filters: runtime # always re-run apt-get upgrade for current security fixes
       - name: Smoke test
         run: |
-          docker run --rm runwarden:ci version
-          docker build -q -f examples/Dockerfile --build-arg BASE=runwarden:ci -t runwarden-examples:ci .
-          docker run --rm --entrypoint runwarden runwarden-examples:ci check-config /runwarden/runners
+          docker run --rm ward:ci version
+          docker build -q -f examples/Dockerfile --build-arg BASE=ward:ci -t ward-examples:ci .
+          docker run --rm --entrypoint ward ward-examples:ci check-config /ward/runners
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: runwarden:ci
+          image-ref: ward:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"

@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/authz"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/history"
-	"github.com/catalinmuraru/runwarden/internal/kube"
-	"github.com/catalinmuraru/runwarden/internal/params"
-	"github.com/catalinmuraru/runwarden/internal/remote"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
-	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/ward/internal/authz"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/history"
+	"github.com/catalinmuraru/ward/internal/kube"
+	"github.com/catalinmuraru/ward/internal/params"
+	"github.com/catalinmuraru/ward/internal/remote"
+	"github.com/catalinmuraru/ward/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/secrets"
 )
 
 var (

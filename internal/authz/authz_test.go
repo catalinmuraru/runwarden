@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/auth"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/policy"
+	"github.com/catalinmuraru/ward/internal/auth"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/policy"
 )
 
 func newAuthorizer(t *testing.T) *Authorizer {
