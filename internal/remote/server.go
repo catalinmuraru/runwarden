@@ -345,9 +345,8 @@ func (c *Conn) forget(id string) {
 
 // StartOptions is what the executor needs besides the job.
 type StartOptions struct {
-	Secrets    []string // secret names the script declares
-	Kubernetes bool     // pin the run to the environment's cluster
-	Files      []File   // uploaded files
+	ConfigHash string // config.Script.Hash of the job's script
+	Files      []File // uploaded files
 }
 
 // Start runs job on the executor. The run's output and result arrive over the connection; if
@@ -361,7 +360,7 @@ func (c *Conn) Start(ctx context.Context, job executor.Job, opts StartOptions) (
 	if err != nil {
 		return nil, nil, err
 	}
-	m := Message{Type: typeStart, ID: job.ID, Start: &Start{Job: job, Secrets: opts.Secrets, Kubernetes: opts.Kubernetes, Files: opts.Files}}
+	m := Message{Type: typeStart, ID: job.ID, Start: &Start{Job: job, ParamArgs: job.ParamArgs, ConfigHash: opts.ConfigHash, Files: opts.Files}}
 	reply, err := c.call(ctx, m, func() { c.runs[job.ID] = &remoteRun{run: run, feed: feed} })
 	if err == nil && reply.Type != typeStarted {
 		err = replyError(reply)
@@ -394,13 +393,13 @@ func replyError(m Message) error {
 	return errors.New(m.Error)
 }
 
-// Capture runs a dropdown helper on the executor and returns its output.
-func (c *Conn) Capture(ctx context.Context, command []string, dir string, secretNames []string, kubernetes bool) ([]byte, error) {
+// Capture runs a helper of a parameter on the executor and returns its output.
+func (c *Conn) Capture(ctx context.Context, req Capture) ([]byte, error) {
 	c.mu.Lock()
 	c.seq++
 	id := "helper-" + strconv.FormatUint(c.seq, 10)
 	c.mu.Unlock()
-	reply, err := c.call(ctx, Message{Type: typeCapture, ID: id, Capture: &Capture{Command: command, Dir: dir, Secrets: secretNames, Kubernetes: kubernetes}}, nil)
+	reply, err := c.call(ctx, Message{Type: typeCapture, ID: id, Capture: &req}, nil)
 	if err != nil {
 		return nil, err
 	}

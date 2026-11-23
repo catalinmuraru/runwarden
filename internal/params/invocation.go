@@ -228,3 +228,22 @@ func EnvName(paramName string) string {
 	}
 	return "PARAM_" + strings.ToUpper(b.String())
 }
+
+// EnvNames returns the variables Build may set for ps: each parameter's variable and
+// EXECUTION_ID. Variables of a run outside this set did not come from Build.
+func EnvNames(ps []*Parameter) map[string]bool {
+	names := map[string]bool{"EXECUTION_ID": true}
+	for _, p := range ps {
+		if !p.PassAs.asEnv() {
+			continue
+		}
+		name := p.EnvVar
+		if name == "" {
+			name = EnvName(p.Name)
+		}
+		if name != "" {
+			names[name] = true
+		}
+	}
+	return names
+}

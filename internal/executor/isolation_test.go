@@ -189,7 +189,7 @@ func TestSandboxedHelper(t *testing.T) {
 	base, env := isolationSetup(t)
 	sb, script := testSandbox(t)
 	e := New(Limits{}, env).WithSandbox(sb)
-	out, err := e.Capture(context.Background(), []string{script("helper_probe.sh").Command[0], filepath.Join(base, "data", "history.jsonl")}, t.TempDir(), nil, nil)
+	out, err := e.Capture(context.Background(), script("helper_probe.sh").Command[0], []string{filepath.Join(base, "data", "history.jsonl")}, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

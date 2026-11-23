@@ -10,24 +10,29 @@ import (
 )
 
 // Job is a run with its parameters already turned into argv, environment and stdin, so it can
-// be started here or sent to an executor in another pod.
+// be started here or sent to an executor in another pod. What shapes the process (program,
+// arguments, directory, redaction, terminal) is never sent: an executor takes it from its own
+// runner config and receives only the parameter arguments (ParamArgs).
 type Job struct {
 	ID         string              `json:"id"`     // empty: StartJob assigns one
-	Script     string              `json:"script"` // script name, for logs
+	Script     string              `json:"script"` // script name
 	User       string              `json:"user"`
-	Command    []string            `json:"command"`     // program and arguments
 	MaskedArgs []string            `json:"masked_args"` // arguments after the program, secure values masked, for display and audit
 	Env        map[string]string   `json:"env"`
 	Stdin      []params.StdinInput `json:"stdin"`
-	Secure     []string            `json:"secure"`   // secure parameter values, masked in the output
-	Redact     []string            `json:"redact"`   // regexes whose matches are masked in the output
-	Dir        string              `json:"dir"`      // working directory
-	Terminal   bool                `json:"terminal"` // run on a pseudo-terminal (where supported)
-	Rows       int                 `json:"rows"`     // initial terminal size; zero: the default
+	Secure     []string            `json:"secure"` // secure parameter values, masked in the output
+	Rows       int                 `json:"rows"`   // initial terminal size; zero: the default
 	Cols       int                 `json:"cols"`
 	Timeout    time.Duration       `json:"timeout"`
 
-	// Filled where the job runs, never sent between pods.
+	// Set from the runner config where the job runs, never sent between pods.
+	Program   string   `json:"-"` // the script's program
+	Args      []string `json:"-"` // fixed arguments of the config, then ParamArgs
+	ParamArgs []string `json:"-"` // the arguments built from the parameter values
+	Redact    []string `json:"-"` // regexes whose matches are masked in the output
+	Dir       string   `json:"-"` // working directory
+	Terminal  bool     `json:"-"` // run on a pseudo-terminal (where supported)
+
 	Secrets map[string]string `json:"-"` // exported to the script and masked in its output
 	Kube    *Kube             `json:"-"`
 	Uploads string            `json:"-"` // directory with the run's uploaded files, readable by a sandboxed run
@@ -46,7 +51,9 @@ func (e *Executor) Job(req Request) Job {
 		ID:         id,
 		Script:     s.Name,
 		User:       req.User,
-		Command:    append(slices.Clone(s.Command), inv.Args...),
+		Program:    s.Command[0],
+		Args:       append(slices.Clone(s.Command[1:]), inv.Args...),
+		ParamArgs:  inv.Args,
 		MaskedArgs: append(slices.Clone(s.Command[1:]), inv.MaskedArgs...),
 		Env:        inv.Env,
 		Stdin:      inv.Stdin,

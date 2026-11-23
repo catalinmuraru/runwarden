@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -17,13 +18,13 @@ const (
 	captureMax     = 1 << 20
 )
 
-// Capture runs a short helper command, such as a script listing the allowed values of a
-// parameter, and returns its stdout. It uses the same environment policy and process-group
+// Capture runs a short helper program with args, such as a script listing the allowed values
+// of a parameter, and returns its stdout. It uses the same environment policy and process-group
 // handling as runs, is not counted against the run limit, and is killed after 30 seconds.
 // secrets are exported to it and masked in what it returns; kube (may be nil) pins it to a
 // cluster as for runs.
-func (e *Executor) Capture(ctx context.Context, command []string, dir string, secrets map[string]string, kube *Kube) ([]byte, error) {
-	if len(command) == 0 {
+func (e *Executor) Capture(ctx context.Context, program string, args []string, dir string, secrets map[string]string, kube *Kube) ([]byte, error) {
+	if program == "" {
 		return nil, errors.New("executor: empty command")
 	}
 	ctx, cancel := context.WithTimeout(ctx, captureTimeout)
@@ -48,7 +49,7 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string, se
 		vars[k] = v
 	}
 	env, _ := e.env.build(nil, secrets, vars)
-	name, args, env := e.wrap(command[0], command[1:], env, []string{ws.shared}, []string{dir0})
+	name, args, env := e.wrap(program, slices.Clone(args), env, []string{ws.shared}, []string{dir0})
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // argv from config, no shell
 	cmd.Dir = dir
 	cmd.Env = env
@@ -70,12 +71,12 @@ func (e *Executor) Capture(ctx context.Context, command []string, dir string, se
 	}
 	switch {
 	case ctx.Err() != nil:
-		return nil, fmt.Errorf("%s: timed out", command[0])
+		return nil, fmt.Errorf("%s: timed out", program)
 	case err != nil:
 		msg := strings.TrimSpace(string(maskAll(stderr.Bytes(), secrets)))
-		return nil, fmt.Errorf("%s: %w: %s", command[0], err, msg)
+		return nil, fmt.Errorf("%s: %w: %s", program, err, msg)
 	case stdout.overflow:
-		return nil, fmt.Errorf("%s: output exceeds %d bytes", command[0], captureMax)
+		return nil, fmt.Errorf("%s: output exceeds %d bytes", program, captureMax)
 	}
 	return maskAll(stdout.Bytes(), secrets), nil
 }

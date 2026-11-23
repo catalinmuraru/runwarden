@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -65,6 +66,14 @@ func executorMain(environment string) error {
 		HomeSkeleton: cfg.HomeSkeleton,
 		Workspace:    cfg.WorkspaceDir,
 	})
+	// The executor runs only the scripts of its own runner configs, never a command the server
+	// sends: it needs the same configs as the server (same image, same mounted ConfigMap).
+	cat, err := loadCatalog(cfg)
+	if err != nil {
+		return fmt.Errorf("configuration: %w", err)
+	}
+	var catalog atomic.Pointer[config.Catalog]
+	catalog.Store(cat)
 	sb, isolation, err := newSandbox(cfg, tempRoot)
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
@@ -79,6 +88,8 @@ func executorMain(environment string) error {
 		Pod:         x.Pod,
 		Version:     version,
 		Exec:        ex,
+		Catalog:     catalog.Load,
+		BaseDir:     cfg.BaseDir,
 		Capacity:    cfg.MaxConcurrentRuns,
 		Secrets:     secrets.Store{Dir: cfg.SecretsDir},
 		Kube:        kube.Store{Dir: cfg.KubeDir},
@@ -98,6 +109,7 @@ func executorMain(environment string) error {
 		Handler:           newExecutorHealthMux(agent),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	go reloadExecutorOnHangup(ctx, cfg, &catalog)
 	errc := make(chan error, 2)
 	go func() { errc <- health.ListenAndServe() }()
 	go func() { errc <- agent.Run(agentCtx) }()
@@ -122,6 +134,27 @@ func executorMain(environment string) error {
 	shutdownCtx, cancelHealth := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelHealth()
 	return health.Shutdown(shutdownCtx)
+}
+
+// reloadExecutorOnHangup reloads the executor's runner configs on SIGHUP. A failed reload keeps
+// the current ones.
+func reloadExecutorOnHangup(ctx context.Context, cfg config.App, catalog *atomic.Pointer[config.Catalog]) {
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-hup:
+			cat, err := loadCatalog(cfg)
+			if err != nil {
+				slog.Error("reload failed; keeping the current configs", "err", err)
+				continue
+			}
+			catalog.Store(cat)
+		}
+	}
 }
 
 // newHub accepts the executors of the environments in EXECUTORS, or returns nil when there are

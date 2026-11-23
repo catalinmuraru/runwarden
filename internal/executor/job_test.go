@@ -23,8 +23,11 @@ func TestJobFromRequest(t *testing.T) {
 	if job.ID == "" || job.User != "alice" || job.Timeout != time.Minute || job.Dir != s.WorkingDirectory {
 		t.Errorf("job = %+v", job)
 	}
-	if want := append(slices.Clone(s.Command), "--name", "x", "--pass", "hunter2"); !slices.Equal(job.Command, want) {
-		t.Errorf("command %q, want %q", job.Command, want)
+	if want := append(slices.Clone(s.Command[1:]), "--name", "x", "--pass", "hunter2"); job.Program != s.Command[0] || !slices.Equal(job.Args, want) {
+		t.Errorf("command %q %q, want %q %q", job.Program, job.Args, s.Command[0], want)
+	}
+	if want := []string{"--name", "x", "--pass", "hunter2"}; !slices.Equal(job.ParamArgs, want) {
+		t.Errorf("parameter args %q, want %q", job.ParamArgs, want)
 	}
 	if !slices.Contains(job.MaskedArgs, params.Mask) || slices.Contains(job.MaskedArgs, "hunter2") {
 		t.Errorf("masked args %q", job.MaskedArgs)
@@ -58,7 +61,7 @@ func TestStartJobErrors(t *testing.T) {
 	if _, err := e.StartJob(Job{}); err == nil {
 		t.Error("empty command accepted")
 	}
-	if _, err := e.StartJob(Job{Command: []string{"/bin/true"}, Redact: []string{"("}}); err == nil {
+	if _, err := e.StartJob(Job{Program: "/bin/true", Redact: []string{"("}}); err == nil {
 		t.Error("invalid redact pattern accepted")
 	}
 	if len(e.Running()) != 0 || len(e.byUser) != 0 {

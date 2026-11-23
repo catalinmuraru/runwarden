@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,8 +18,10 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/kube"
+	"github.com/catalinmuraru/runwarden/internal/params"
 	"github.com/catalinmuraru/runwarden/internal/sandbox"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
 )
@@ -40,14 +43,18 @@ type Agent struct {
 	Pod         string
 	Version     string
 	Exec        *executor.Executor
-	Capacity    int // concurrent runs Exec accepts, reported to the server
-	Secrets     secrets.Store
-	Kube        kube.Store
-	Isolation   sandbox.Status
-	UploadDir   string        // uploaded files of runs in progress go below it
-	ReadLimit   int64         // largest message accepted; zero: 256 MiB
-	Heartbeat   time.Duration // zero: 15 seconds
-	HTTPClient  *http.Client
+	// Catalog returns the current runner configs (safe to call while they are reloaded). The
+	// executor runs only the scripts and helpers they describe.
+	Catalog    func() *config.Catalog
+	BaseDir    string // resolves relative helper programs, as on the server
+	Capacity   int    // concurrent runs Exec accepts, reported to the server
+	Secrets    secrets.Store
+	Kube       kube.Store
+	Isolation  sandbox.Status
+	UploadDir  string        // uploaded files of runs in progress go below it
+	ReadLimit  int64         // largest message accepted; zero: 256 MiB
+	Heartbeat  time.Duration // zero: 15 seconds
+	HTTPClient *http.Client
 
 	connected atomic.Bool
 
@@ -287,23 +294,36 @@ func (s *session) handle(ctx context.Context, m Message) {
 	}
 }
 
-// start runs a job: the environment's secrets and kubeconfig are added here, uploaded files
-// are written to this pod's disk. Its output is streamed until it ends.
+// start runs a script of this executor's runner configs. The job is built here from that
+// config: the message names the script and carries what the parameter values produce
+// (arguments, variables, stdin), never the program, directory or secret names. The
+// environment's secrets and kubeconfig are added here, uploaded files are written to this
+// pod's disk. Its output is streamed until it ends.
 func (s *session) start(ctx context.Context, id string, st Start) {
+	recv := st.Job
 	fail := func(err error) {
 		msg := err.Error()
 		if errors.Is(err, executor.ErrBusy) || errors.Is(err, executor.ErrUserBusy) {
 			msg = errBusy
 		}
-		logger().Warn("executor: run not started", "run", id, "script", st.Job.Script, "err", err)
+		logger().Warn("executor: run not started", "run", id, "script", recv.Script, "err", err)
 		_ = s.send(ctx, Message{Type: typeFailed, ID: id, Error: msg})
 	}
-	job := st.Job
-	if !validID.MatchString(id) || job.ID != id || s.run(id) != nil {
+	if !validID.MatchString(id) || recv.ID != id || s.run(id) != nil {
 		fail(fmt.Errorf("invalid run ID %q", id))
 		return
 	}
 	a := s.a
+	sc, err := a.script(recv.Script, st.ConfigHash)
+	if err != nil {
+		fail(err)
+		return
+	}
+	job, err := newJob(id, sc, recv, st.ParamArgs)
+	if err != nil {
+		fail(err)
+		return
+	}
 	if !a.begin() {
 		fail(errors.New("the executor is shutting down"))
 		return
@@ -315,8 +335,8 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 		}
 	}()
 	env := []string{a.Environment}
-	if len(st.Secrets) > 0 {
-		res, err := a.Secrets.Resolve(st.Secrets, env, nil)
+	if len(sc.Secrets) > 0 {
+		res, err := a.Secrets.Resolve(sc.Secrets, env, nil)
 		if err != nil {
 			fail(err)
 			return
@@ -324,7 +344,7 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 		job.Secrets = res.Env
 	}
 	var info Started
-	if st.Kubernetes {
+	if sc.Kubernetes {
 		res, err := a.Kube.Resolve(env, nil)
 		if err != nil {
 			fail(err)
@@ -338,6 +358,7 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 		fail(err)
 		return
 	}
+	job.Args = append(slices.Clone(sc.Command[1:]), job.ParamArgs...)
 	cleanup := func() {
 		if uploads != "" {
 			_ = os.RemoveAll(uploads)
@@ -365,6 +386,60 @@ func (s *session) start(ctx context.Context, id string, st Start) {
 		a.Exec.Forget(id)
 		cleanup()
 	}()
+}
+
+// script returns the script name of this executor's runner configs, provided its config
+// hashes to hash (the hash of the server's config of it).
+func (a *Agent) script(name, hash string) (*config.Script, error) {
+	var sc *config.Script
+	if a.Catalog != nil {
+		if cat := a.Catalog(); cat != nil {
+			sc = cat.Script(name)
+		}
+	}
+	if sc == nil || len(sc.Command) == 0 {
+		return nil, fmt.Errorf("script %q is not in the runner configs of this executor", name)
+	}
+	if sc.Hash() != hash {
+		return nil, fmt.Errorf("runner config of %s differs between server and executor; roll the executors", name)
+	}
+	return sc, nil
+}
+
+// newJob builds a new job of run id from sc, this executor's config of the script. Only what
+// parameter values produce comes from the received job: the arguments after the config's
+// fixed ones (paramArgs), the variables sc's parameters declare, stdin and the values to mask.
+// Program, directory, redaction and terminal come from sc; Args is set once uploads are placed.
+func newJob(id string, sc *config.Script, recv executor.Job, paramArgs []string) (executor.Job, error) {
+	declared := params.EnvNames(sc.Parameters)
+	env := make(map[string]string, len(recv.Env))
+	for k, v := range recv.Env {
+		if !declared[k] {
+			return executor.Job{}, fmt.Errorf("variable %s is not declared by the parameters of %s", k, sc.Name)
+		}
+		env[k] = v
+	}
+	redact := make([]string, len(sc.RedactPatterns))
+	for i, re := range sc.RedactPatterns {
+		redact[i] = re.String()
+	}
+	return executor.Job{
+		ID:         id,
+		Script:     sc.Name,
+		User:       recv.User,
+		MaskedArgs: slices.Clone(recv.MaskedArgs),
+		Env:        env,
+		Stdin:      slices.Clone(recv.Stdin),
+		Secure:     slices.Clone(recv.Secure),
+		Rows:       recv.Rows,
+		Cols:       recv.Cols,
+		Timeout:    recv.Timeout,
+		Program:    sc.Command[0],
+		ParamArgs:  slices.Clone(paramArgs),
+		Redact:     redact,
+		Dir:        sc.WorkingDirectory,
+		Terminal:   sc.RequiresTerminal,
+	}, nil
 }
 
 // stream sends r's output in chunks, then its result.
@@ -395,7 +470,7 @@ func (s *session) stream(ctx context.Context, r *executor.Run) {
 }
 
 // writeFiles stores a run's uploaded files below UploadDir/<id> and points the job's
-// arguments, variables and stdin values at them instead of the server's paths.
+// parameter arguments, variables and stdin values at them instead of the server's paths.
 func (a *Agent) writeFiles(id string, files []File, job *executor.Job) (string, error) {
 	if len(files) == 0 {
 		return "", nil
@@ -420,8 +495,8 @@ func (a *Agent) writeFiles(id string, files []File, job *executor.Job) (string, 
 		pairs = append(pairs, f.Path, local)
 	}
 	rep := strings.NewReplacer(pairs...)
-	for i := 1; i < len(job.Command); i++ {
-		job.Command[i] = rep.Replace(job.Command[i])
+	for i := range job.ParamArgs {
+		job.ParamArgs[i] = rep.Replace(job.ParamArgs[i])
 	}
 	for k, v := range job.Env {
 		job.Env[k] = rep.Replace(v)
@@ -448,7 +523,9 @@ func safeName(name string) string {
 	return name
 }
 
-// capture runs a dropdown helper with the environment's secrets and kubeconfig.
+// capture runs a helper of a parameter with the environment's secrets and kubeconfig. The
+// command is the helper template of this executor's config, expanded with the received
+// values; its program never comes from them.
 func (s *session) capture(ctx context.Context, id string, c Capture) {
 	reply := func(data []byte, err error) {
 		m := Message{Type: typeCaptured, ID: id, Data: data}
@@ -457,15 +534,36 @@ func (s *session) capture(ctx context.Context, id string, c Capture) {
 		}
 		_ = s.send(ctx, m)
 	}
-	if len(c.Command) == 0 {
-		reply(nil, errors.New("empty command"))
+	a := s.a
+	sc, err := a.script(c.Script, c.ConfigHash)
+	if err != nil {
+		logger().Warn("executor: helper refused", "script", c.Script, "parameter", c.Param, "err", err)
+		reply(nil, err)
 		return
 	}
-	a := s.a
+	p := sc.Parameter(c.Param)
+	if p == nil {
+		reply(nil, fmt.Errorf("script %s has no parameter %q", sc.Name, c.Param))
+		return
+	}
+	tmpl := config.Helper(p, c.Kind)
+	if tmpl == "" {
+		reply(nil, fmt.Errorf("parameter %s of %s has no %q helper", p.Name, sc.Name, c.Kind))
+		return
+	}
+	program, args, err := config.ExpandProgram(tmpl, func(name string) (string, bool) {
+		v, ok := c.Values[name]
+		return v, ok
+	})
+	if err != nil {
+		reply(nil, err)
+		return
+	}
+	program = config.ResolveProgram(a.BaseDir, program)
 	env := []string{a.Environment}
 	var values map[string]string
-	if len(c.Secrets) > 0 {
-		res, err := a.Secrets.Resolve(c.Secrets, env, nil)
+	if len(sc.Secrets) > 0 {
+		res, err := a.Secrets.Resolve(sc.Secrets, env, nil)
 		if err != nil {
 			reply(nil, err)
 			return
@@ -473,7 +571,7 @@ func (s *session) capture(ctx context.Context, id string, c Capture) {
 		values = res.Env
 	}
 	var kc *executor.Kube
-	if c.Kubernetes {
+	if sc.Kubernetes {
 		res, err := a.Kube.Resolve(env, nil)
 		if err != nil {
 			reply(nil, err)
@@ -481,5 +579,5 @@ func (s *session) capture(ctx context.Context, id string, c Capture) {
 		}
 		kc = &executor.Kube{Config: res.Kubeconfig, Env: res.Env}
 	}
-	reply(a.Exec.Capture(ctx, c.Command, c.Dir, values, kc))
+	reply(a.Exec.Capture(ctx, program, args, sc.WorkingDirectory, values, kc))
 }
