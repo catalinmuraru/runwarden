@@ -15,7 +15,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/catalinmuraru/ward/internal/compat"
 	"github.com/catalinmuraru/ward/internal/config"
 	"github.com/catalinmuraru/ward/internal/executor"
 	"github.com/catalinmuraru/ward/internal/params"
@@ -576,28 +575,6 @@ func TestSafeName(t *testing.T) {
 	for in, want := range map[string]string{"report.txt": "report.txt", "evil name;rm.sh": "evil_name_rm.sh", "..": "file", "": "file"} {
 		if got := safeName(in); got != want {
 			t.Errorf("safeName(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-// v0.5: executors that predate the rename send only the former header name.
-func TestLegacyEnvironmentHeader(t *testing.T) {
-	_, ts := newHub(t)
-	for name, want := range map[string]bool{compat.LegacyEnvironmentHeader: true, "X-Other": false} {
-		header := http.Header{}
-		header.Set("Authorization", "Bearer "+testToken)
-		header.Set(name, "prod")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ws, resp, err := websocket.Dial(ctx, ts.URL+Path, &websocket.DialOptions{HTTPHeader: header})
-		cancel()
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-		if (err == nil) != want {
-			t.Errorf("%s: dial err = %v, want accepted %v", name, err, want)
-		}
-		if ws != nil {
-			_ = ws.CloseNow()
 		}
 	}
 }

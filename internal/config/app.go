@@ -14,8 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/catalinmuraru/ward/internal/compat"
 )
 
 // App is the server configuration, read from environment variables.
@@ -304,8 +302,8 @@ func load(getenv func(string) string, executorMode bool) (App, error) {
 	if app.RunHome != RunHomePerRun && app.RunHome != RunHomeShared {
 		errs = append(errs, fmt.Errorf("RUN_HOME: unknown value %q (want per-run or shared)", app.RunHome))
 	}
-	app.SecretsDir = dir("SECRETS_DIR", compat.Dir("/ward/secrets", "/runwarden/secrets", compat.DirExists))
-	app.KubeDir = dir("KUBE_DIR", compat.Dir("/ward/kube", "/runwarden/kube", compat.DirExists))
+	app.SecretsDir = dir("SECRETS_DIR", "/ward/secrets")
+	app.KubeDir = dir("KUBE_DIR", "/ward/kube")
 	if str("WORKSPACE_DIR", "") != "" {
 		app.WorkspaceDir = dir("WORKSPACE_DIR", "")
 	}

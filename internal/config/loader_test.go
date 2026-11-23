@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/ward/internal/compat"
 	"github.com/catalinmuraru/ward/internal/params"
 )
 
@@ -355,11 +354,11 @@ func TestSplitCommand(t *testing.T) {
 //
 //	WARD_CONFIG_DIR=/path/to/runners [WARD_CONFIG_BASE_DIR=/path] go test ./internal/config -run Compat -v
 func TestCompat(t *testing.T) {
-	dir := compat.Getenv("WARD_CONFIG_DIR")
+	dir := os.Getenv("WARD_CONFIG_DIR")
 	if dir == "" {
 		t.Skip("WARD_CONFIG_DIR not set")
 	}
-	cat, err := LoadDir(dir, Options{BaseDir: compat.Getenv("WARD_CONFIG_BASE_DIR")})
+	cat, err := LoadDir(dir, Options{BaseDir: os.Getenv("WARD_CONFIG_BASE_DIR")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +382,6 @@ func TestSecretsField(t *testing.T) {
 		"prefix.json":   `{"name": "Prefix", "script_path": "run.sh", "secrets": ["SOURCE_DB"]}`,
 		"ld.json":       `{"name": "Ld", "script_path": "run.sh", "secrets": ["LD_PRELOAD"]}`,
 		"ward.json":     `{"name": "Ward", "script_path": "run.sh", "secrets": ["WARD_USER"]}`,
-		"legacy.json":   `{"name": "Legacy", "script_path": "run.sh", "secrets": ["RUNWARDEN_USER"]}`,
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
@@ -400,7 +398,7 @@ func TestSecretsField(t *testing.T) {
 	if s := cat.Script("Single"); s == nil || !slices.Equal(s.Secrets, []string{"CF_API_TOKEN"}) {
 		t.Errorf("single = %+v", s)
 	}
-	if len(cat.Errors) != 6 {
+	if len(cat.Errors) != 5 {
 		t.Errorf("errors = %v", cat.Errors)
 	}
 	if len(cat.Warnings) != 1 || !strings.Contains(cat.Warnings[0].Msg, "only the common secrets") || filepath.Base(cat.Warnings[0].File) != "single.json" {

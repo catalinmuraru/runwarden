@@ -18,7 +18,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/catalinmuraru/ward/internal/compat"
 	"github.com/catalinmuraru/ward/internal/config"
 	"github.com/catalinmuraru/ward/internal/executor"
 	"github.com/catalinmuraru/ward/internal/kube"
@@ -160,7 +159,6 @@ func (a *Agent) session(ctx context.Context) error {
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+a.Token)
 	header.Set(EnvironmentHeader, a.Environment)
-	header.Set(compat.LegacyEnvironmentHeader, a.Environment) // v0.5: servers that predate the rename
 	dctx, cancel := context.WithTimeout(ctx, helloTimeout)
 	ws, resp, err := websocket.Dial(dctx, strings.TrimSuffix(a.URL, "/")+Path, &websocket.DialOptions{HTTPHeader: header, HTTPClient: a.HTTPClient})
 	cancel()

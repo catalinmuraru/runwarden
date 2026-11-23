@@ -17,8 +17,6 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v4"
-
-	"github.com/catalinmuraru/ward/internal/compat"
 )
 
 // FileName is the kubeconfig file inside an environment directory.
@@ -276,7 +274,6 @@ func (s Store) Resolve(targets, sources []string) (Result, error) {
 		return Result{}, err
 	}
 	res.Kubeconfig = data
-	compat.ExportBoth(res.Env) // v0.5: for executors that predate the rename
 	return res, nil
 }
 
