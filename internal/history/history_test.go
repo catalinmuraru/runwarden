@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
 )
 
 func runProduce(t *testing.T, s *Store, ex *executor.Executor, work string) string {

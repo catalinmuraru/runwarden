@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/remote"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/remote"
 )
 
 func TestExecutorConfigErrors(t *testing.T) {

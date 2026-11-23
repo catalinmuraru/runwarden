@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/sandbox"
 )
 
 func TestCheckIsolation(t *testing.T) {
-	cfg := config.App{DataDir: "/var/lib/runwarden", SecretsDir: "/runwarden/secrets", KubeDir: "/runwarden/kube", WorkspaceDir: "/var/lib/runwarden-work"} //nolint:gosec // paths, not credentials
-	allowed := append(append([]string{"/opt/runwarden"}, sandboxRead...), sandboxWrite...)
+	cfg := config.App{DataDir: "/var/lib/ward", SecretsDir: "/ward/secrets", KubeDir: "/ward/kube", WorkspaceDir: "/var/lib/ward-work"} //nolint:gosec // paths, not credentials
+	allowed := append(append([]string{"/opt/ward"}, sandboxRead...), sandboxWrite...)
 	if err := checkIsolation(cfg, allowed); err != nil {
 		t.Errorf("production layout refused: %v", err)
 	}
@@ -20,11 +20,11 @@ func TestCheckIsolation(t *testing.T) {
 		allowed []string
 		want    string
 	}{
-		{"secrets under /etc", func(c *config.App) { c.SecretsDir = "/etc/runwarden/secrets" }, nil, "SECRETS_DIR"},
-		{"kubeconfigs under /etc", func(c *config.App) { c.KubeDir = "/etc/runwarden/kube" }, nil, "KUBE_DIR"},
-		{"data under the base dir", func(c *config.App) { c.DataDir = "/opt/runwarden/data" }, nil, "DATA_DIR"},
-		{"workspace root readable", func(*config.App) {}, []string{"/var/lib/runwarden-work"}, "WORKSPACE_DIR"},
-		{"extra path inside the data dir", func(*config.App) {}, []string{"/var/lib/runwarden/tmp"}, "DATA_DIR"},
+		{"secrets under /etc", func(c *config.App) { c.SecretsDir = "/etc/ward/secrets" }, nil, "SECRETS_DIR"},
+		{"kubeconfigs under /etc", func(c *config.App) { c.KubeDir = "/etc/ward/kube" }, nil, "KUBE_DIR"},
+		{"data under the base dir", func(c *config.App) { c.DataDir = "/opt/ward/data" }, nil, "DATA_DIR"},
+		{"workspace root readable", func(*config.App) {}, []string{"/var/lib/ward-work"}, "WORKSPACE_DIR"},
+		{"extra path inside the data dir", func(*config.App) {}, []string{"/var/lib/ward/tmp"}, "DATA_DIR"},
 		{"extra path above everything", func(*config.App) {}, []string{"/var"}, "DATA_DIR"},
 	}
 	for _, tt := range tests {
@@ -37,7 +37,7 @@ func TestCheckIsolation(t *testing.T) {
 			}
 		})
 	}
-	if err := checkIsolation(cfg, []string{"/var/lib/runwarden-other"}); err != nil {
+	if err := checkIsolation(cfg, []string{"/var/lib/ward-other"}); err != nil {
 		t.Errorf("sibling with a common prefix refused: %v", err)
 	}
 }

@@ -7,4 +7,4 @@ docs
 deploy
 *.test
 *.out
-/runwarden
+/ward

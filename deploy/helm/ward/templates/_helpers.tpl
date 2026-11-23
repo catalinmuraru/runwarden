@@ -1,4 +1,4 @@
-{{- define "runwarden.fullname" -}}
+{{- define "ward.fullname" -}}
 {{- if contains .Chart.Name .Release.Name -}}
 {{- .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -6,19 +6,19 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "runwarden.selectorLabels" -}}
+{{- define "ward.selectorLabels" -}}
 app.kubernetes.io/name: {{ .Chart.Name }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
-{{- define "runwarden.labels" -}}
-{{ include "runwarden.selectorLabels" . }}
+{{- define "ward.labels" -}}
+{{ include "ward.selectorLabels" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end -}}
 
-{{- define "runwarden.image" -}}
+{{- define "ward.image" -}}
 {{- if .Values.image.digest -}}
 {{ .Values.image.repository }}@{{ .Values.image.digest }}
 {{- else -}}
@@ -26,16 +26,16 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end -}}
 {{- end -}}
 
-{{- define "runwarden.serviceAccountName" -}}
+{{- define "ward.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
-{{- .Values.serviceAccount.name | default (include "runwarden.fullname" .) -}}
+{{- .Values.serviceAccount.name | default (include "ward.fullname" .) -}}
 {{- else -}}
 {{- .Values.serviceAccount.name | default "default" -}}
 {{- end -}}
 {{- end -}}
 
 {{/* Environment from values: only settings that are set, sorted by name. */}}
-{{- define "runwarden.env" -}}
+{{- define "ward.env" -}}
 {{- $a := .Values.auth -}}
 {{- if hasKey $a "type" -}}
 {{- fail "auth.type was replaced by auth.methods (a list): e.g. auth.methods: [gitlab]" -}}
@@ -73,13 +73,13 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- fail (printf "auth.%s was removed: set auth.initialAdmin=true, sign in as the built-in administrator and give the devops role to the first user in the Admin area" $old) -}}
 {{- end -}}
 {{- end -}}
-{{- include "runwarden.runSettings" (dict "root" . "env" $e) -}}
+{{- include "ward.runSettings" (dict "root" . "env" $e) -}}
 {{- if and .Values.kube.environments (ne (toString .Values.runs.home) "per-run") -}}
 {{- fail "kube.environments needs runs.home=per-run: the kubeconfig is written into the run's private HOME" -}}
 {{- end -}}
 {{- with .Values.executors -}}
 {{- $hashes := dict -}}
-{{- range $env, $x := . }}{{ $_ := set $hashes $env (include "runwarden.executorTokenSha256" (dict "root" $ "env" $env)) }}{{ end -}}
+{{- range $env, $x := . }}{{ $_ := set $hashes $env (include "ward.executorTokenSha256" (dict "root" $ "env" $env)) }}{{ end -}}
 {{- $_ := set $e "EXECUTORS" (toJson $hashes) -}}
 {{- end -}}
 {{- $p := .Values.policy -}}
@@ -90,7 +90,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- with .Values.trustedProxies }}{{ $_ := set $e "TRUSTED_PROXIES" (join "," .) }}{{ end -}}
 {{- $_ := set $e "HISTORY_MAX_AGE" (toString .Values.history.maxAge) -}}
 {{- $_ := set $e "HISTORY_MAX_RUNS" (toString .Values.history.maxRuns) -}}
-{{- if .Values.workspace.enabled }}{{ $_ := set $e "WORKSPACE_DIR" "/var/lib/runwarden-work" }}{{ end -}}
+{{- if .Values.workspace.enabled }}{{ $_ := set $e "WORKSPACE_DIR" "/var/lib/ward-work" }}{{ end -}}
 {{- if has "oidc" $methods -}}
 {{- $_ := set $e "OIDC_ISSUER_URL" (required "auth.oidc.issuerUrl is required" $a.oidc.issuerUrl) -}}
 {{- $_ := set $e "OIDC_CLIENT_ID" (required "auth.oidc.clientId is required" $a.oidc.clientId) -}}
@@ -119,10 +119,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- with $a.ldap.userGroupsAttr }}{{ $_ := set $e "LDAP_USER_GROUPS_ATTR" . }}{{ end -}}
 {{- with $a.ldap.label }}{{ $_ := set $e "LDAP_LABEL" . }}{{ end -}}
 {{- end -}}
-{{- include "runwarden.envList" $e }}
+{{- include "ward.envList" $e }}
 {{- end -}}
 
-{{- define "runwarden.envList" -}}
+{{- define "ward.envList" -}}
 {{- range $k, $v := . }}
 - name: {{ $k }}
   value: {{ $v | quote }}
@@ -131,7 +131,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 
 
 {{/* Settings of how scripts run, shared by the server and the executors: (dict "root" . "env" $dict). */}}
-{{- define "runwarden.runSettings" -}}
+{{- define "ward.runSettings" -}}
 {{- $v := .root.Values -}}
 {{- $e := .env -}}
 {{- $l := $v.limits -}}
@@ -139,10 +139,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- $_ := set $e "MAX_OUTPUT_BYTES" (toString $l.maxOutputBytes) -}}
 {{- $_ := set $e "MAX_UPLOAD_BYTES" (toString $l.maxUploadBytes) -}}
 {{- $_ := set $e "RUN_HOME" (toString $v.runs.home) -}}
-{{- if $v.runs.homeSkeletonConfigMap }}{{ $_ := set $e "HOME_SKELETON" "/runwarden/home-skeleton" }}{{ end -}}
+{{- if $v.runs.homeSkeletonConfigMap }}{{ $_ := set $e "HOME_SKELETON" "/ward/home-skeleton" }}{{ end -}}
 {{- $_ := set $e "HEALTH_ADDR" ":8081" -}}
-{{- $_ := set $e "SECRETS_DIR" "/runwarden/secrets" -}}
-{{- $_ := set $e "KUBE_DIR" "/runwarden/kube" -}}
+{{- $_ := set $e "SECRETS_DIR" "/ward/secrets" -}}
+{{- $_ := set $e "KUBE_DIR" "/ward/kube" -}}
 {{- $iso := $v.isolation -}}
 {{- $_ := set $e "ISOLATION" (toString $iso.mode) -}}
 {{- with $iso.readPaths }}{{ $_ := set $e "ISOLATION_READ_PATHS" (join "," .) }}{{ end -}}
@@ -151,23 +151,23 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end -}}
 
 {{/* Kubernetes name part of an environment: lower case, "_" and "." become "-". */}}
-{{- define "runwarden.envSlug" -}}
+{{- define "ward.envSlug" -}}
 {{- . | lower | replace "_" "-" | replace "." "-" | trunc 30 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/* Executor resource name: (dict "root" . "env" "<environment>"). */}}
-{{- define "runwarden.executorName" -}}
-{{- printf "%s-executor-%s" (include "runwarden.fullname" .root | trunc 32 | trimSuffix "-") (include "runwarden.envSlug" .env) -}}
+{{- define "ward.executorName" -}}
+{{- printf "%s-executor-%s" (include "ward.fullname" .root | trunc 32 | trimSuffix "-") (include "ward.envSlug" .env) -}}
 {{- end -}}
 
-{{- define "runwarden.executorSelectorLabels" -}}
+{{- define "ward.executorSelectorLabels" -}}
 app.kubernetes.io/name: {{ .root.Chart.Name }}-executor
 app.kubernetes.io/instance: {{ .root.Release.Name }}
-runwarden/environment: {{ include "runwarden.envSlug" .env }}
+ward/environment: {{ include "ward.envSlug" .env }}
 {{- end -}}
 
-{{- define "runwarden.executorLabels" -}}
-{{ include "runwarden.executorSelectorLabels" . }}
+{{- define "ward.executorLabels" -}}
+{{ include "ward.executorSelectorLabels" . }}
 app.kubernetes.io/version: {{ .root.Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version | replace "+" "_" }}
@@ -177,7 +177,7 @@ helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version | replace 
 Token of an environment's executor, generated once and kept across upgrades (read back from its
 Secret). Every template of one render sees the same value: it is kept in .Values.
 */}}
-{{- define "runwarden.executorToken" -}}
+{{- define "ward.executorToken" -}}
 {{- $root := .root -}}
 {{- if not (hasKey $root.Values "__executorTokens") -}}
 {{- $_ := set $root.Values "__executorTokens" dict -}}
@@ -185,7 +185,7 @@ Secret). Every template of one render sees the same value: it is kept in .Values
 {{- $tokens := index $root.Values "__executorTokens" -}}
 {{- if not (hasKey $tokens .env) -}}
 {{- $token := randAlphaNum 48 -}}
-{{- with lookup "v1" "Secret" $root.Release.Namespace (include "runwarden.executorName" .) -}}
+{{- with lookup "v1" "Secret" $root.Release.Namespace (include "ward.executorName" .) -}}
 {{- with index .data "token" }}{{ $token = b64dec . }}{{ end -}}
 {{- end -}}
 {{- $_ := set $tokens .env $token -}}
@@ -194,7 +194,7 @@ Secret). Every template of one render sees the same value: it is kept in .Values
 {{- end -}}
 
 {{/* Hex SHA-256 of an environment's executor token, as the server's EXECUTORS wants it. */}}
-{{- define "runwarden.executorTokenSha256" -}}
+{{- define "ward.executorTokenSha256" -}}
 {{- $x := index .root.Values.executors .env | default dict -}}
 {{- $t := $x.token | default dict -}}
 {{- if $t.existingSecret -}}
@@ -203,6 +203,6 @@ Secret). Every template of one render sees the same value: it is kept in .Values
 {{- end -}}
 {{- $t.sha256 | lower -}}
 {{- else -}}
-{{- include "runwarden.executorToken" . | sha256sum -}}
+{{- include "ward.executorToken" . | sha256sum -}}
 {{- end -}}
 {{- end -}}

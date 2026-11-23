@@ -1,4 +1,4 @@
-module github.com/catalinmuraru/runwarden
+module github.com/catalinmuraru/ward
 
 go 1.27.4
 

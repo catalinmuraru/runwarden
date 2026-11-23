@@ -1,10 +1,10 @@
 package api
 
 import (
-	"github.com/catalinmuraru/runwarden/internal/authz"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/history"
+	"github.com/catalinmuraru/ward/internal/authz"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/history"
 )
 
 // resolveKube returns the kubeconfig pinning a run of sc to the cluster of its target

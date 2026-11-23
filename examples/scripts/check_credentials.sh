@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shows which secrets the run received without revealing them: length and a short fingerprint.
-# Printing a value directly is safe too: Runwarden masks every secret in the output.
+# Printing a value directly is safe too: Ward masks every secret in the output.
 set -euo pipefail
 
 for name in DB_PASSWORD API_TOKEN SOURCE_DB_PASSWORD; do

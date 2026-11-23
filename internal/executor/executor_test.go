@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 const testWait = 20 * time.Second

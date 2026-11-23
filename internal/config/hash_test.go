@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 func TestScriptHash(t *testing.T) {

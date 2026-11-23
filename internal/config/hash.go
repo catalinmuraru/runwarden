@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // Hash identifies the parts of s that shape a run: command, working directory, parameters

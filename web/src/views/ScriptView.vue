@@ -43,7 +43,7 @@ async function load() {
       if (p.values && !p.dynamic_values) options[p.name] = p.values
     }
     script.value = s
-    document.title = `${s.name} · Runwarden`
+    document.title = `${s.name} · Ward`
   } catch (e) {
     loadError.value = e instanceof ApiError && e.status === 404 ? 'This script does not exist or is not available to you.' : String(e)
   }

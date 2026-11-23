@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "runwarden.fullname" . }}
+  name: {{ include "ward.fullname" . }}
   labels:
-    {{- include "runwarden.labels" . | nindent 4 }}
+    {{- include "ward.labels" . | nindent 4 }}
 spec:
   # Running scripts live in this one process: never run two pods side by side.
   replicas: 1
@@ -11,11 +11,11 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      {{- include "runwarden.selectorLabels" . | nindent 6 }}
+      {{- include "ward.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "runwarden.selectorLabels" . | nindent 8 }}
+        {{- include "ward.selectorLabels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -25,7 +25,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      serviceAccountName: {{ include "runwarden.serviceAccountName" . }}
+      serviceAccountName: {{ include "ward.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
@@ -40,8 +40,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: runwarden
-          image: {{ include "runwarden.image" . | quote }}
+        - name: ward
+          image: {{ include "ward.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -49,7 +49,7 @@ spec:
             - name: health
               containerPort: 8081
           env:
-            {{- include "runwarden.env" . | nindent 12 }}
+            {{- include "ward.env" . | nindent 12 }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -84,41 +84,41 @@ spec:
           {{- end }}
           volumeMounts:
             - name: data
-              mountPath: /var/lib/runwarden
+              mountPath: /var/lib/ward
             - name: tmp
               mountPath: /tmp
             - name: home
-              mountPath: /home/runwarden
+              mountPath: /home/ward
             {{- if .Values.workspace.enabled }}
             - name: workspace
-              mountPath: /var/lib/runwarden-work
+              mountPath: /var/lib/ward-work
             {{- end }}
             {{- if .Values.runners.configs }}
             - name: runners
-              mountPath: /runwarden/runners
+              mountPath: /ward/runners
               readOnly: true
             {{- end }}
             {{- if .Values.runs.homeSkeletonConfigMap }}
             - name: home-skeleton
-              mountPath: /runwarden/home-skeleton
+              mountPath: /ward/home-skeleton
               readOnly: true
             {{- end }}
             {{- with .Values.secrets.common }}
             - name: secrets-common
-              mountPath: /runwarden/secrets/common
+              mountPath: /ward/secrets/common
               readOnly: true
             {{- end }}
             {{- range $i, $env := keys .Values.secrets.environments | sortAlpha }}
             {{- if not (hasKey $.Values.executors $env) }}
             - name: secrets-{{ $i }}
-              mountPath: /runwarden/secrets/{{ $env }}
+              mountPath: /ward/secrets/{{ $env }}
               readOnly: true
             {{- end }}
             {{- end }}
             {{- range $i, $env := keys .Values.kube.environments | sortAlpha }}
             {{- if not (hasKey $.Values.executors $env) }}
             - name: kube-{{ $i }}
-              mountPath: /runwarden/kube/{{ $env }}
+              mountPath: /ward/kube/{{ $env }}
               readOnly: true
             {{- end }}
             {{- end }}
@@ -129,7 +129,7 @@ spec:
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ .Values.persistence.existingClaim | default (include "runwarden.fullname" .) }}
+            claimName: {{ .Values.persistence.existingClaim | default (include "ward.fullname" .) }}
           {{- else }}
           emptyDir: {}
           {{- end }}
@@ -140,12 +140,12 @@ spec:
         {{- if .Values.workspace.enabled }}
         - name: workspace
           persistentVolumeClaim:
-            claimName: {{ .Values.workspace.existingClaim | default (printf "%s-workspace" (include "runwarden.fullname" .)) }}
+            claimName: {{ .Values.workspace.existingClaim | default (printf "%s-workspace" (include "ward.fullname" .)) }}
         {{- end }}
         {{- if .Values.runners.configs }}
         - name: runners
           configMap:
-            name: {{ include "runwarden.fullname" . }}-runners
+            name: {{ include "ward.fullname" . }}-runners
         {{- end }}
         {{- with .Values.runs.homeSkeletonConfigMap }}
         - name: home-skeleton

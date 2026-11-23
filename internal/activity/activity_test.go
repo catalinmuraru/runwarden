@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/audit"
+	"github.com/catalinmuraru/ward/internal/audit"
 )
 
 var t0 = time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)

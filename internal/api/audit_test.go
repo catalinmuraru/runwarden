@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/executor"
+	"github.com/catalinmuraru/ward/internal/executor"
 )
 
 // lockedBuffer is a log sink safe for concurrent writes and reads.
@@ -55,7 +55,7 @@ type auditLine struct {
 		ExitCode *int     `json:"exit_code"`
 		Args     []string `json:"args"`
 	}
-	Runwarden struct {
+	Ward struct {
 		Run    struct{ ID, Status, Parameters string }
 		Script struct{ Name string }
 	}
@@ -66,7 +66,7 @@ func auditEvents(t *testing.T, logs *lockedBuffer) []auditLine {
 	var out []auditLine
 	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
 		var a auditLine
-		if json.Unmarshal([]byte(line), &a) == nil && a.Event.Dataset == "runwarden.audit" {
+		if json.Unmarshal([]byte(line), &a) == nil && a.Event.Dataset == "ward.audit" {
 			out = append(out, a)
 		}
 	}
@@ -76,7 +76,7 @@ func auditEvents(t *testing.T, logs *lockedBuffer) []auditLine {
 func find(events []auditLine, action, outcome, script string) *auditLine {
 	for i := range events {
 		e := &events[i]
-		if e.Event.Action == action && e.Event.Outcome == outcome && e.Runwarden.Script.Name == script {
+		if e.Event.Action == action && e.Event.Outcome == outcome && e.Ward.Script.Name == script {
 			return e
 		}
 	}
@@ -109,12 +109,12 @@ func TestAuditTrail(t *testing.T) {
 
 	start := find(events, "run-start", "success", "Echo")
 	if start == nil || start.User.Name != "alice" || start.User.Roles[0] != "developer" || start.Source.IP != "127.0.0.1" ||
-		start.Runwarden.Run.ID != id || !strings.Contains(start.Runwarden.Run.Parameters, `"Token":"******"`) {
+		start.Ward.Run.ID != id || !strings.Contains(start.Ward.Run.Parameters, `"Token":"******"`) {
 		t.Errorf("run-start = %+v", start)
 	}
 	end := find(events, "run-end", "success", "Echo")
 	if end == nil || end.User.Name != "alice" || end.Process.ExitCode == nil || *end.Process.ExitCode != 0 ||
-		end.Runwarden.Run.Status != "finished" || end.Event.Duration <= 0 || end.Source.IP != "127.0.0.1" {
+		end.Ward.Run.Status != "finished" || end.Event.Duration <= 0 || end.Source.IP != "127.0.0.1" {
 		t.Errorf("run-end = %+v", end)
 	}
 	if f := find(events, "run-start", "failure", "Restricted"); f == nil || f.User.Name != "bob" || f.Event.Reason != "not allowed to run this script" {
@@ -123,7 +123,7 @@ func TestAuditTrail(t *testing.T) {
 	if f := find(events, "run-start", "failure", "Echo"); f == nil || !strings.Contains(f.Event.Reason, `"Name": must match`) {
 		t.Errorf("invalid parameters = %+v", f)
 	}
-	if f := find(events, "run-input", "success", "Prompt"); f == nil || f.Runwarden.Run.ID != prompt {
+	if f := find(events, "run-input", "success", "Prompt"); f == nil || f.Ward.Run.ID != prompt {
 		t.Errorf("input = %+v", f)
 	}
 	if f := find(events, "run-kill", "success", "Sleep"); f == nil {

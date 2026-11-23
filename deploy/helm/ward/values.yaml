@@ -1,7 +1,7 @@
-# Image with Runwarden and your scripts. Usually a scripts image built FROM the Runwarden base
+# Image with Ward and your scripts. Usually a scripts image built FROM the Ward base
 # image (see examples/Dockerfile).
 image:
-  repository: ghcr.io/catalinmuraru/runwarden
+  repository: ghcr.io/catalinmuraru/ward
   # Defaults to the chart's appVersion.
   tag: ""
   # sha256:... — when set, the image is pulled by digest and tag is ignored.
@@ -16,7 +16,7 @@ auth:
   # Must also be true for methods [none]: everyone who can reach the server becomes an admin.
   allowNoAuth: false
   # Built-in administrator "admin@local" for bootstrapping and emergencies. While true, a new
-  # random password is written at every start to /var/lib/runwarden/initial-admin-password
+  # random password is written at every start to /var/lib/ward/initial-admin-password
   # (read it with kubectl exec ... cat); it is never logged. Set back to false once devops
   # users exist: the password file is removed and the administrator's sessions end.
   initialAdmin: false
@@ -24,7 +24,7 @@ auth:
   # further attempts are refused, besides 5 per user name and address. 0 = no limit.
   maxFailuresPerIP: 20
   maxFailuresGlobal: 100
-  # External URL, e.g. https://runwarden.example.com (required for gitlab and oidc; the
+  # External URL, e.g. https://ward.example.com (required for gitlab and oidc; the
   # provider's redirect URI is <publicUrl>/auth/callback).
   publicUrl: ""
   sessionTTL: 12h
@@ -88,7 +88,7 @@ runs:
 
 # Isolation between runs: every run is sandboxed with Landlock (Linux >= 5.13, no privileges
 # needed). It cannot read other runs' files or /proc/<pid>/environ, other users' workspaces,
-# Runwarden's data or the mounted secrets and kubeconfigs, and with Linux >= 6.12 it cannot
+# Ward's data or the mounted secrets and kubeconfigs, and with Linux >= 6.12 it cannot
 # signal other runs. required: refuse to start without it; auto: run unsandboxed with a
 # warning; off: no sandbox.
 isolation:
@@ -97,7 +97,7 @@ isolation:
   readPaths: []
   writePaths: []
   # RLIMIT_NPROC for sandboxed runs (0 = unchanged). It counts every process of the pod's user,
-  # Runwarden included, so it is a guard against fork bombs, not a per-run quota.
+  # Ward included, so it is a guard against fork bombs, not a per-run quota.
   maxProcs: 0
 
 # Helper scripts that fill dropdowns and defaults: concurrent calls per user and in total, and
@@ -114,29 +114,29 @@ activity:
 
 # Secrets for scripts, per environment: each value is the name of a Kubernetes Secret (created
 # outside the chart, e.g. with External Secrets or sealed secrets) mounted read-only at
-# /runwarden/secrets/<environment>, one file per key. A run receives only the secrets its
+# /ward/secrets/<environment>, one file per key. A run receives only the secrets its
 # runner config declares ("secrets": [...]), from the environment it runs in; keys of `common`
 # are used when the environment has no key of that name. Environment names must match the
 # environments of the access policy (Admin area > Environments).
 secrets:
   common: ""
   environments: {}
-  #   development: runwarden-secrets-development
-  #   production: runwarden-secrets-production
+  #   development: ward-secrets-development
+  #   production: ward-secrets-production
 
 # Kubernetes cluster per environment: each value is the name of a Kubernetes Secret holding a
-# kubeconfig under the key "config", mounted read-only at /runwarden/kube/<environment>/config.
+# kubeconfig under the key "config", mounted read-only at /ward/kube/<environment>/config.
 # Runners with "kubernetes": true get the kubeconfig of the environment they run in, with its
-# context renamed to the environment name. The file is opaque to Runwarden: credentials its exec
+# context renamed to the environment name. The file is opaque to Ward: credentials its exec
 # plugin needs come from `secrets` of the same environment. Several environments may share a
 # cluster (namespace set in the context). Needs runs.home=per-run.
 kube:
   environments: {}
-  #   development: runwarden-kube-development
-  #   production: runwarden-kube-production
+  #   development: ward-kube-development
+  #   production: ward-kube-production
 
 # Executors: the environments listed here run their scripts and dropdown helpers in their own
-# pods (`runwarden executor`), which connect out to the server; the server keeps history, audit
+# pods (`ward executor`), which connect out to the server; the server keeps history, audit
 # and access control. The environment's `secrets` and `kube` entries above are mounted in its
 # executor pods instead of the server, so no other environment's runs (and not the server) can
 # reach them. Runs are refused while no executor of their environment is connected, and a run
@@ -151,7 +151,7 @@ executors: {}
 #    token:
 #      existingSecret: ""
 #      sha256: ""
-#    # Default http://<release service>.<namespace>.svc; e.g. https://runwarden.example.com for
+#    # Default http://<release service>.<namespace>.svc; e.g. https://ward.example.com for
 #    # executors in another cluster.
 #    serverUrl: ""
 #    # Runs at the same time per replica (default limits.maxConcurrentRuns).
@@ -218,8 +218,8 @@ history:
   maxRuns: 0
 
 # Persistent working space for scripts that keep files between runs (git clones, dumps).
-# Mounted at /var/lib/runwarden-work, one private directory per user: scripts see their own as
-# $RUNWARDEN_WORKSPACE (read-write) and <root>/shared as $RUNWARDEN_SHARED (read-only for runs).
+# Mounted at /var/lib/ward-work, one private directory per user: scripts see their own as
+# $WARD_WORKSPACE (read-write) and <root>/shared as $WARD_SHARED (read-only for runs).
 workspace:
   enabled: false
   size: 10Gi
@@ -231,7 +231,7 @@ workspace:
 
 runners:
   # Runner configs as file name → config object. Empty: use the configs baked into the image
-  # (/runwarden/runners). When set, they replace the image's configs.
+  # (/ward/runners). When set, they replace the image's configs.
   configs: {}
 
 # Run history (DATA_DIR). Without persistence, history is lost when the pod restarts.
@@ -279,8 +279,8 @@ ingress:
   annotations: {}
   host: ""
   tls: []
-  #  - secretName: runwarden-tls
-  #    hosts: [runwarden.example.com]
+  #  - secretName: ward-tls
+  #    hosts: [ward.example.com]
 
 serviceAccount:
   create: true

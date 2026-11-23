@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/executor"
+	"github.com/catalinmuraru/ward/internal/executor"
 )
 
 func TestHelperLimits(t *testing.T) {

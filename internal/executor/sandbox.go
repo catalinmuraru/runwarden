@@ -10,13 +10,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/sandbox"
 )
 
 // Sandbox confines runs and helpers with Landlock (package sandbox): each one may read Read,
 // write Write plus its own run directory and its user's workspace, and nothing else.
 type Sandbox struct {
-	Exe      string   // binary with the sandbox-exec subcommand (runwarden itself)
+	Exe      string   // binary with the sandbox-exec subcommand (ward itself)
 	Read     []string // read and execute for every run: system directories, scripts
 	Write    []string // full access for every run: /dev/null, /dev/tty, operator extras
 	MaxProcs uint64   // RLIMIT_NPROC per run (counted per uid, so a guard, not a quota); 0: unchanged
@@ -97,7 +97,7 @@ func (p EnvPolicy) prepareWorkspace(user string, helper bool) (workspace, error)
 	if err := os.MkdirAll(ws.shared, 0o755); err != nil { //nolint:gosec // read by every run on purpose
 		return workspace{}, fmt.Errorf("shared workspace: %w", err)
 	}
-	ws.vars["RUNWARDEN_SHARED"] = ws.shared
+	ws.vars["WARD_SHARED"] = ws.shared
 	if helper {
 		return ws, nil
 	}
@@ -105,7 +105,7 @@ func (p EnvPolicy) prepareWorkspace(user string, helper bool) (workspace, error)
 	if err := os.Mkdir(ws.own, 0o700); err != nil && !os.IsExist(err) {
 		return workspace{}, fmt.Errorf("workspace: %w", err)
 	}
-	ws.vars["RUNWARDEN_WORKSPACE"] = ws.own
+	ws.vars["WARD_WORKSPACE"] = ws.own
 	return ws, nil
 }
 

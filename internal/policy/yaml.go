@@ -11,7 +11,7 @@ import (
 // ExportYAML encodes the policy for download (without the revision).
 func ExportYAML(p *Policy) ([]byte, error) {
 	var buf bytes.Buffer
-	buf.WriteString("# Runwarden access policy. Import it in the Admin area; it replaces the whole policy.\n")
+	buf.WriteString("# Ward access policy. Import it in the Admin area; it replaces the whole policy.\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(p); err != nil {

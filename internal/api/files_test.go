@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/executor"
+	"github.com/catalinmuraru/ward/internal/executor"
 )
 
 // fileTree creates:

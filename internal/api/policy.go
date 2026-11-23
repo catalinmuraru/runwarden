@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/activity"
-	"github.com/catalinmuraru/runwarden/internal/audit"
-	"github.com/catalinmuraru/runwarden/internal/auth"
-	"github.com/catalinmuraru/runwarden/internal/policy"
+	"github.com/catalinmuraru/ward/internal/activity"
+	"github.com/catalinmuraru/ward/internal/audit"
+	"github.com/catalinmuraru/ward/internal/auth"
+	"github.com/catalinmuraru/ward/internal/policy"
 )
 
 // maxPolicyBytes bounds an imported policy.
@@ -417,7 +417,7 @@ func (s *Server) exportPolicy(w http.ResponseWriter, r *http.Request) {
 	s.record(r, audit.Event{Action: audit.PolicyChange, Category: "configuration", Type: "info", Success: true,
 		PolicyObject: "policy", PolicyChange: "exported", Message: "access policy exported"})
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="runwarden-policy.yaml"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="ward-policy.yaml"`)
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
 }

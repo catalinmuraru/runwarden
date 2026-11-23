@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/clientip"
+	"github.com/catalinmuraru/ward/internal/clientip"
 )
 
 type fakeRedirect struct {
@@ -219,8 +219,8 @@ func TestRedirectLoginFailures(t *testing.T) {
 }
 
 func TestRequiredGroup(t *testing.T) {
-	member := Method{ID: "gitlab", Redirect: fakeRedirect{user: "dev", groups: []string{"Company/Runwarden/devs"}}, RequiredGroup: "company/runwarden"}
-	outsider := Method{ID: "oidc", Redirect: fakeRedirect{user: "guest", groups: []string{"company/other", "company/runwarden-x"}}, RequiredGroup: "company/runwarden"}
+	member := Method{ID: "gitlab", Redirect: fakeRedirect{user: "dev", groups: []string{"Company/Ward/devs"}}, RequiredGroup: "company/ward"}
+	outsider := Method{ID: "oidc", Redirect: fakeRedirect{user: "guest", groups: []string{"company/other", "company/ward-x"}}, RequiredGroup: "company/ward"}
 	e := newAuthEnv(t, Options{Methods: []Method{member, outsider}})
 
 	login, state := e.startRedirect("gitlab")
@@ -388,7 +388,7 @@ func TestLoginAudit(t *testing.T) {
 
 	logs := buf.String()
 	for _, want := range []string{
-		`"action":"login","outcome":"failure","dataset":"runwarden.audit","reason":"invalid user name or password"`,
+		`"action":"login","outcome":"failure","dataset":"ward.audit","reason":"invalid user name or password"`,
 		`"action":"login","outcome":"success"`,
 		`"user":{"name":"alice"}`,
 		`"source":{"ip":"198.51.100.23"}`,

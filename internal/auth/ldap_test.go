@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-ldap/ldap/v3"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
+	"github.com/catalinmuraru/ward/internal/config"
 )
 
 // fakeDirectory answers the searches the provider makes, keyed by exact filter strings.

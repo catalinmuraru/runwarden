@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // Job is a run with its parameters already turned into argv, environment and stdin, so it can

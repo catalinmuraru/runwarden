@@ -20,12 +20,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/catalinmuraru/runwarden/internal/auth"
-	"github.com/catalinmuraru/runwarden/internal/authz"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/history"
-	"github.com/catalinmuraru/runwarden/internal/policy"
+	"github.com/catalinmuraru/ward/internal/auth"
+	"github.com/catalinmuraru/ward/internal/authz"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/history"
+	"github.com/catalinmuraru/ward/internal/policy"
 )
 
 const testWait = 20 * time.Second
@@ -307,7 +307,7 @@ func TestRunWithJSON(t *testing.T) {
 		t.Errorf("meta = %+v", meta)
 	}
 	if out := e.output(id); !strings.Contains(out, "user=alice\n") {
-		t.Errorf("RUNWARDEN_USER not passed to the script:\n%s", out)
+		t.Errorf("WARD_USER not passed to the script:\n%s", out)
 	}
 	if meta.Values["Token"] != "******" || meta.Values["Env"] != "prod" {
 		t.Errorf("values = %v", meta.Values)

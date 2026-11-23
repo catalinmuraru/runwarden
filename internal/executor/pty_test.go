@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 func terminalScript(t *testing.T, file string, ps ...*params.Parameter) Request {

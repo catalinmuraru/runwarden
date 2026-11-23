@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/catalinmuraru/runwarden/internal/api"
-	"github.com/catalinmuraru/runwarden/internal/auth"
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/api"
+	"github.com/catalinmuraru/ward/internal/auth"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/sandbox"
 )
 
 func get(t *testing.T, h http.Handler, method, path string) int {

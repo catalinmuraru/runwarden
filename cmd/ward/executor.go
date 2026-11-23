@@ -16,14 +16,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/kube"
-	"github.com/catalinmuraru/runwarden/internal/remote"
-	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/kube"
+	"github.com/catalinmuraru/ward/internal/remote"
+	"github.com/catalinmuraru/ward/internal/secrets"
 )
 
-// runExecutor is `runwarden executor [--environment <name>]`: it dials out to the server and
+// runExecutor is `ward executor [--environment <name>]`: it dials out to the server and
 // runs that environment's runs and dropdown helpers, holding the environment's secrets and
 // kubeconfig. The server keeps history, audit, limits and access control.
 func runExecutor(args []string, stderr io.Writer) int {
@@ -34,7 +34,7 @@ func runExecutor(args []string, stderr io.Writer) int {
 		return 2
 	}
 	if err := executorMain(*env); err != nil {
-		slog.Error("runwarden executor stopped", "err", err)
+		slog.Error("ward executor stopped", "err", err)
 		return 1
 	}
 	return 0

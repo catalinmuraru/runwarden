@@ -8,12 +8,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/kube"
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/kube"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
-// checkConfig implements `runwarden check-config <runners-dir>`: it loads every runner config,
+// checkConfig implements `ward check-config <runners-dir>`: it loads every runner config,
 // reports scripts, warnings and errors, and returns the process exit code.
 func checkConfig(args []string, out io.Writer) int {
 	return checkConfigWith(args, out, os.Getenv)
@@ -21,7 +21,7 @@ func checkConfig(args []string, out io.Writer) int {
 
 func checkConfigWith(args []string, out io.Writer, getenv func(string) string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(out, "usage: runwarden check-config <runners-dir>")
+		_, _ = fmt.Fprintln(out, "usage: ward check-config <runners-dir>")
 		return 2
 	}
 	cat, err := config.LoadDir(args[0], config.Options{})

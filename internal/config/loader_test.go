@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/compat"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // repoRoot is the base dir for the example runners, whose paths are relative to the repo root.
@@ -352,13 +353,13 @@ func TestSplitCommand(t *testing.T) {
 
 // TestCompat loads an external runners directory and fails on any error. It is opt-in:
 //
-//	RUNWARDEN_CONFIG_DIR=/path/to/runners [RUNWARDEN_CONFIG_BASE_DIR=/path] go test ./internal/config -run Compat -v
+//	WARD_CONFIG_DIR=/path/to/runners [WARD_CONFIG_BASE_DIR=/path] go test ./internal/config -run Compat -v
 func TestCompat(t *testing.T) {
-	dir := os.Getenv("RUNWARDEN_CONFIG_DIR")
+	dir := compat.Getenv("WARD_CONFIG_DIR")
 	if dir == "" {
-		t.Skip("RUNWARDEN_CONFIG_DIR not set")
+		t.Skip("WARD_CONFIG_DIR not set")
 	}
-	cat, err := LoadDir(dir, Options{BaseDir: os.Getenv("RUNWARDEN_CONFIG_BASE_DIR")})
+	cat, err := LoadDir(dir, Options{BaseDir: compat.Getenv("WARD_CONFIG_BASE_DIR")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,6 +382,8 @@ func TestSecretsField(t *testing.T) {
 		"reserved.json": `{"name": "Reserved", "script_path": "run.sh", "secrets": ["PATH"]}`,
 		"prefix.json":   `{"name": "Prefix", "script_path": "run.sh", "secrets": ["SOURCE_DB"]}`,
 		"ld.json":       `{"name": "Ld", "script_path": "run.sh", "secrets": ["LD_PRELOAD"]}`,
+		"ward.json":     `{"name": "Ward", "script_path": "run.sh", "secrets": ["WARD_USER"]}`,
+		"legacy.json":   `{"name": "Legacy", "script_path": "run.sh", "secrets": ["RUNWARDEN_USER"]}`,
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
@@ -397,7 +400,7 @@ func TestSecretsField(t *testing.T) {
 	if s := cat.Script("Single"); s == nil || !slices.Equal(s.Secrets, []string{"CF_API_TOKEN"}) {
 		t.Errorf("single = %+v", s)
 	}
-	if len(cat.Errors) != 4 {
+	if len(cat.Errors) != 6 {
 		t.Errorf("errors = %v", cat.Errors)
 	}
 	if len(cat.Warnings) != 1 || !strings.Contains(cat.Warnings[0].Msg, "only the common secrets") || filepath.Base(cat.Warnings[0].File) != "single.json" {

@@ -12,7 +12,7 @@ fi
 
 echo "Waiting for Keycloak..."
 for _ in $(seq 90); do
-  curl -fs http://localhost:8180/realms/runwarden/.well-known/openid-configuration >/dev/null && break
+  curl -fs http://localhost:8180/realms/ward/.well-known/openid-configuration >/dev/null && break
   sleep 2
 done
 echo "Waiting for OpenLDAP..."

@@ -17,8 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // Limits bound what runs may consume. Zero fields take the defaults.
@@ -51,7 +51,7 @@ type Request struct {
 	Script  *config.Script
 	Values  map[string]params.Value // validated values, see config.Script.Values
 	Timeout time.Duration           // zero means Limits.Timeout
-	User    string                  // signed-in user, exported to the script as RUNWARDEN_USER
+	User    string                  // signed-in user, exported to the script as WARD_USER
 	// Secrets are exported to the script (name → value) and masked in its output.
 	Secrets map[string]string
 	// Kube pins the run to its environment's cluster; nil: no kubeconfig is written.
@@ -206,7 +206,7 @@ func (e *Executor) start(job Job, onEnd func()) (*Run, error) {
 	terminal := job.Terminal && ptySupported
 	fixed := map[string]string{}
 	if job.User != "" {
-		fixed["RUNWARDEN_USER"] = job.User
+		fixed["WARD_USER"] = job.User
 	}
 	if terminal {
 		fixed["TERM"] = "xterm-256color"

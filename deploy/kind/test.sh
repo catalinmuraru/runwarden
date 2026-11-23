@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds the images, deploys the Helm chart into a local kind cluster and checks that Runwarden
+# Builds the images, deploys the Helm chart into a local kind cluster and checks that Ward
 # works there: scripts run, output streams over WebSocket, the security context is enforced and
 # history survives a pod restart, runs are pinned to their environment's cluster, and the built-in
 # administrator works. KEEP=1 leaves the release and cluster running.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-CLUSTER=runwarden
-NS=runwarden
+CLUSTER=ward
+NS=ward
 PORT=18080
 HPORT=18081
 B=http://127.0.0.1:$PORT
@@ -21,13 +21,13 @@ kind get clusters | grep -qx "$CLUSTER" || kind create cluster --config deploy/k
 kubectl config use-context "kind-$CLUSTER" >/dev/null
 
 step "Images"
-docker build -q --build-arg VERSION=v0.0.0-kind -t runwarden:dev . >/dev/null
-docker build -q -f examples/Dockerfile --build-arg BASE=runwarden:dev -t runwarden-examples:dev . >/dev/null
+docker build -q --build-arg VERSION=v0.0.0-kind -t ward:dev . >/dev/null
+docker build -q -f examples/Dockerfile --build-arg BASE=ward:dev -t ward-examples:dev . >/dev/null
 # Test-only layer: kubectl and a runner with "kubernetes": true.
 E2E=$(mktemp -d)
 cp "$(command -v kubectl)" "$E2E/kubectl"
 cat > "$E2E/kube_whoami.json" <<'EOF'
-{ "name": "Kube Whoami", "group": "Test", "script_path": "/opt/runwarden/e2e/kube_whoami.sh",
+{ "name": "Kube Whoami", "group": "Test", "script_path": "/opt/ward/e2e/kube_whoami.sh",
   "working_directory": ".", "requires_terminal": false, "tags": ["devops"], "kubernetes": true,
   "environment_parameters": { "Environment": "target", "Source": "source" },
   "parameters": [
@@ -38,18 +38,18 @@ EOF
 cat > "$E2E/kube_whoami.sh" <<'EOF'
 #!/usr/bin/env bash
 sleep "${WAIT:-0}"
-echo "context=$(kubectl config current-context) var=$RUNWARDEN_KUBE_CONTEXT source=${RUNWARDEN_KUBE_SOURCE_CONTEXT:-}"
+echo "context=$(kubectl config current-context) var=$WARD_KUBE_CONTEXT source=${WARD_KUBE_SOURCE_CONTEXT:-}"
 echo "marker=$(kubectl get configmap marker -o jsonpath='{.data.env}')"
 for ns in rw-development rw-acceptance rw-production; do
   if kubectl get configmaps -n "$ns" >/dev/null 2>&1; then echo "list $ns: allowed"; else echo "list $ns: denied"; fi
 done
-if [ -n "${RUNWARDEN_KUBE_SOURCE_CONTEXT:-}" ]; then
-  echo "source marker=$(kubectl --context "$RUNWARDEN_KUBE_SOURCE_CONTEXT" get configmap marker -o jsonpath='{.data.env}')"
+if [ -n "${WARD_KUBE_SOURCE_CONTEXT:-}" ]; then
+  echo "source marker=$(kubectl --context "$WARD_KUBE_SOURCE_CONTEXT" get configmap marker -o jsonpath='{.data.env}')"
 fi
 EOF
 # Isolation between runs: a victim holding a secret and private files, and an attacker.
 cat > "$E2E/isolation_victim.json" <<'EOF'
-{ "name": "Isolation Victim", "group": "Test", "script_path": "/opt/runwarden/e2e/isolation_victim.sh",
+{ "name": "Isolation Victim", "group": "Test", "script_path": "/opt/ward/e2e/isolation_victim.sh",
   "working_directory": ".", "requires_terminal": false, "tags": ["devops"], "secrets": ["DB_PASSWORD"],
   "environment_parameters": { "Environment": "target" },
   "parameters": [ { "name": "Environment", "type": "list", "required": true, "values": ["production"] } ] }
@@ -57,12 +57,12 @@ EOF
 cat > "$E2E/isolation_victim.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "victim-home" > "$HOME/token"
-echo "victim-notes" > "$RUNWARDEN_WORKSPACE/notes"
+echo "victim-notes" > "$WARD_WORKSPACE/notes"
 echo "ready pid=$$ home=$HOME"
 exec sleep 20
 EOF
 cat > "$E2E/isolation_attack.json" <<'EOF'
-{ "name": "Isolation Attack", "group": "Test", "script_path": "/opt/runwarden/e2e/isolation_attack.sh",
+{ "name": "Isolation Attack", "group": "Test", "script_path": "/opt/ward/e2e/isolation_attack.sh",
   "working_directory": ".", "requires_terminal": false, "tags": ["devops"],
   "parameters": [
     { "name": "Pid", "type": "int", "required": true, "env_var": "VICTIM_PID" },
@@ -80,39 +80,39 @@ try other-home cat "$VICTIM_HOME/token"
 try other-environ cat "/proc/$VICTIM_PID/environ"
 try other-mem head -c1 "/proc/$VICTIM_PID/mem"
 try other-signal kill -0 "$VICTIM_PID"
-try data-dir ls /var/lib/runwarden
-try secrets ls /runwarden/secrets/production
-try kubeconfigs ls /runwarden/kube
-try runner-configs ls /runwarden/runners
-try workspace-root ls /var/lib/runwarden-work
-try other-workspace cat /var/lib/runwarden-work/mallory/notes
-try shared-write touch /var/lib/runwarden-work/shared/evil
+try data-dir ls /var/lib/ward
+try secrets ls /ward/secrets/production
+try kubeconfigs ls /ward/kube
+try runner-configs ls /ward/runners
+try workspace-root ls /var/lib/ward-work
+try other-workspace cat /var/lib/ward-work/mallory/notes
+try shared-write touch /var/lib/ward-work/shared/evil
 try own-home sh -c 'echo x > "$HOME/f" && cat "$HOME/f"'
-try own-workspace sh -c 'echo x > "$RUNWARDEN_WORKSPACE/f" && cat "$RUNWARDEN_WORKSPACE/f"'
+try own-workspace sh -c 'echo x > "$WARD_WORKSPACE/f" && cat "$WARD_WORKSPACE/f"'
 try system cat /etc/os-release
 echo "attacks done"
 EOF
 cat > "$E2E/Dockerfile" <<'EOF'
-FROM runwarden-examples:dev
+FROM ward-examples:dev
 COPY --chmod=0755 kubectl /usr/local/bin/kubectl
-COPY kube_whoami.json isolation_victim.json isolation_attack.json /runwarden/runners/
-COPY --chmod=0755 kube_whoami.sh isolation_victim.sh isolation_attack.sh /opt/runwarden/e2e/
+COPY kube_whoami.json isolation_victim.json isolation_attack.json /ward/runners/
+COPY --chmod=0755 kube_whoami.sh isolation_victim.sh isolation_attack.sh /opt/ward/e2e/
 EOF
-docker build -q -t runwarden-e2e:dev "$E2E" >/dev/null
+docker build -q -t ward-e2e:dev "$E2E" >/dev/null
 rm -rf "$E2E"
-kind load docker-image runwarden-e2e:dev --name "$CLUSTER"
+kind load docker-image ward-e2e:dev --name "$CLUSTER"
 
 step "Install"
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-kubectl -n "$NS" create secret generic runwarden-env --from-literal=RUNNER_ENV_GREETING=hello \
+kubectl -n "$NS" create secret generic ward-env --from-literal=RUNNER_ENV_GREETING=hello \
   --from-literal=SESSION_KEY="$(openssl rand -base64 32)" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 DEV_DB=dev-db-password
 PROD_DB=prod-db-password-2026
 secret() { kubectl -n "$NS" create secret generic "$1" "${@:2}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null; }
-secret runwarden-secrets-common --from-literal=API_TOKEN=common-api-token
-secret runwarden-secrets-development --from-literal=DB_PASSWORD="$DEV_DB"
-secret runwarden-secrets-production --from-literal=DB_PASSWORD="$PROD_DB"
+secret ward-secrets-common --from-literal=API_TOKEN=common-api-token
+secret ward-secrets-development --from-literal=DB_PASSWORD="$DEV_DB"
+secret ward-secrets-production --from-literal=DB_PASSWORD="$PROD_DB"
 # One namespace + ServiceAccount per environment; each may read only its own ConfigMaps.
 CA=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
 for env in development acceptance production; do
@@ -127,20 +127,20 @@ for env in development acceptance production; do
     "clusters: [{name: kind, cluster: {server: 'https://kubernetes.default.svc', certificate-authority-data: '$CA'}}]" \
     "users: [{name: runner, user: {token: '$token'}}]" \
     "contexts: [{name: kind-$env, context: {cluster: kind, user: runner, namespace: $ns}}]" \
-    | kubectl -n "$NS" create secret generic "runwarden-kube-$env" --from-file=config=/dev/stdin --dry-run=client -o yaml \
+    | kubectl -n "$NS" create secret generic "ward-kube-$env" --from-file=config=/dev/stdin --dry-run=client -o yaml \
     | kubectl apply -f - >/dev/null
 done
-helm upgrade --install runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 3m
-kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m
+helm upgrade --install ward deploy/helm/ward -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 3m
+kubectl -n "$NS" rollout status deploy/ward --timeout 2m
 
 PF=
 HF=
 forward() {
   [ -n "$PF" ] && kill "$PF" "$HF" 2>/dev/null || true
   # The web port through the Service; the health port only exists on the pod.
-  kubectl -n "$NS" port-forward svc/runwarden "$PORT:80" >/dev/null 2>&1 &
+  kubectl -n "$NS" port-forward svc/ward "$PORT:80" >/dev/null 2>&1 &
   PF=$!
-  kubectl -n "$NS" port-forward deploy/runwarden "$HPORT:8081" >/dev/null 2>&1 &
+  kubectl -n "$NS" port-forward deploy/ward "$HPORT:8081" >/dev/null 2>&1 &
   HF=$!
   for _ in $(seq 50); do curl -fs "$H/readyz" >/dev/null && curl -fs "$B/auth/config" >/dev/null && return; sleep 0.2; done
   fail "service not reachable"
@@ -148,7 +148,7 @@ forward() {
 cleanup() {
   [ -n "$PF" ] && kill "$PF" "$HF" 2>/dev/null || true
   if [ "${KEEP:-}" != "1" ]; then
-    helm uninstall runwarden -n "$NS" >/dev/null 2>&1 || true
+    helm uninstall ward -n "$NS" >/dev/null 2>&1 || true
     kubectl delete namespace "$NS" --wait=false >/dev/null 2>&1 || true
   fi
 }
@@ -163,7 +163,7 @@ curl -fs "$B/api/scripts/%F0%9F%97%82%EF%B8%8F%20Rotate%20Logs/parameters/Instan
   | jq -e '[.values[].value] | index("web-3")' >/dev/null || fail "dynamic values helper did not run"
 
 step "Health endpoints only on the health port"
-[ "$(kubectl -n "$NS" get svc runwarden -o jsonpath='{.spec.ports[*].name}')" = "http" ] || fail "service exposes more than http"
+[ "$(kubectl -n "$NS" get svc ward -o jsonpath='{.spec.ports[*].name}')" = "http" ] || fail "service exposes more than http"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/readyz")
 [ "$code" = "404" ] || fail "/readyz on the service answered $code"
 echo "probes on :8081, service exposes only http, /readyz on the service is 404"
@@ -200,13 +200,13 @@ code=$(curl -s -o /tmp/rw-acc.json -w '%{http_code}' -X POST "$B/api/scripts/Che
 [ "$code" = "409" ] && grep -q 'DB_PASSWORD is not available in acceptance' /tmp/rw-acc.json || fail "missing secret answered $code: $(cat /tmp/rw-acc.json)"
 curl -fs "$B/api/admin/secrets" | jq -e '(.scripts[] | select(.name == "Check Credentials") | .missing.acceptance) == ["DB_PASSWORD"]' >/dev/null \
   || fail "admin secrets page does not show the gap"
-[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /runwarden/secrets/production/DB_PASSWORD)" = "440" ] || fail "secret file mode"
-if kubectl -n "$NS" exec deploy/runwarden -- env | grep -q "$PROD_DB"; then fail "secret in Runwarden's own environment"; fi
-echo "each environment's value reaches its runs (common as fallback), masked; missing secret refused; files 0440, not in Runwarden's env"
+[ "$(kubectl -n "$NS" exec deploy/ward -- stat -L -c %a /ward/secrets/production/DB_PASSWORD)" = "440" ] || fail "secret file mode"
+if kubectl -n "$NS" exec deploy/ward -- env | grep -q "$PROD_DB"; then fail "secret in Ward's own environment"; fi
+echo "each environment's value reaches its runs (common as fallback), masked; missing secret refused; files 0440, not in Ward's env"
 
 step "Private HOME per run, one run per user"
-curl -fs "$B/api/runs/$ID/output" | grep -q 'HOME=/var/lib/runwarden/tmp/'"$ID"'/home' || fail "run did not get a private HOME"
-curl -fs "$B/api/runs/$ID/output" | grep -q 'KUBECONFIG=/var/lib/runwarden/tmp/'"$ID"'/home/.kube/config' || fail "KUBECONFIG not private"
+curl -fs "$B/api/runs/$ID/output" | grep -q 'HOME=/var/lib/ward/tmp/'"$ID"'/home' || fail "run did not get a private HOME"
+curl -fs "$B/api/runs/$ID/output" | grep -q 'KUBECONFIG=/var/lib/ward/tmp/'"$ID"'/home/.kube/config' || fail "KUBECONFIG not private"
 first=$(curl -fs -X POST "$B/api/scripts/Restart%20Service/runs" -H 'Content-Type: application/json' -d '{"values":{"Service":"api"}}' | jq -r .id)
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/scripts/Restart%20Service/runs" -H 'Content-Type: application/json' -d '{"values":{"Service":"api"}}')
 [ "$code" = "429" ] || fail "second concurrent run by the same user answered $code"
@@ -214,9 +214,9 @@ timeout 30 websocat -t --no-close "ws://127.0.0.1:$PORT/api/runs/$first/ws" </de
 echo "HOME and KUBECONFIG inside the run's own directory; a second concurrent run is refused"
 
 step "Audit log (ECS) in the pod log"
-kubectl -n "$NS" logs deploy/runwarden | jq -ec --arg id "$ID" \
-  'select(.event.dataset == "runwarden.audit" and .event.action == "run-end" and .runwarden.run.id == $id)
-   | {action: .event.action, outcome: .event.outcome, user: .user.name, exit: .process.exit_code, script: .runwarden.script.name}' \
+kubectl -n "$NS" logs deploy/ward | jq -ec --arg id "$ID" \
+  'select(.event.dataset == "ward.audit" and .event.action == "run-end" and .ward.run.id == $id)
+   | {action: .event.action, outcome: .event.outcome, user: .user.name, exit: .process.exit_code, script: .ward.script.name}' \
   || fail "no run-end audit event for $ID"
 
 step "Running runs, timeouts and admin pages"
@@ -228,21 +228,21 @@ curl -fs "$B/api/admin/users" | jq -e '.users | length > 0' >/dev/null || fail "
 echo "running list, per-script timeout, activity log and users index work"
 
 step "Workspace"
-kubectl -n "$NS" exec deploy/runwarden -- sh -c 'touch /var/lib/runwarden-work/probe && echo "workspace writable"' \
+kubectl -n "$NS" exec deploy/ward -- sh -c 'touch /var/lib/ward-work/probe && echo "workspace writable"' \
   || fail "workspace not writable"
 
 step "Security context"
-kubectl -n "$NS" exec deploy/runwarden -- id | grep -q 'uid=10001' || fail "not running as 10001"
-if kubectl -n "$NS" exec deploy/runwarden -- touch /opt/runwarden/x 2>/dev/null; then fail "root filesystem is writable"; fi
-kubectl -n "$NS" exec deploy/runwarden -- touch /tmp/x /home/runwarden/x || fail "tmp/home not writable"
-kubectl -n "$NS" exec deploy/runwarden -- sh -c 'test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token' \
+kubectl -n "$NS" exec deploy/ward -- id | grep -q 'uid=10001' || fail "not running as 10001"
+if kubectl -n "$NS" exec deploy/ward -- touch /opt/ward/x 2>/dev/null; then fail "root filesystem is writable"; fi
+kubectl -n "$NS" exec deploy/ward -- touch /tmp/x /home/ward/x || fail "tmp/home not writable"
+kubectl -n "$NS" exec deploy/ward -- sh -c 'test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token' \
   || fail "service account token mounted"
 echo "uid 10001, read-only root, writable /tmp and HOME, no API token"
 
 step "Kubernetes clusters per environment"
 upgrade() {
-  helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml "$@" --wait --timeout 3m >/dev/null
-  kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m >/dev/null
+  helm upgrade ward deploy/helm/ward -n "$NS" -f deploy/kind/values-kind.yaml "$@" --wait --timeout 3m >/dev/null
+  kubectl -n "$NS" rollout status deploy/ward --timeout 2m >/dev/null
   forward
 }
 upgrade --set limits.maxRunsPerUser=0
@@ -274,19 +274,19 @@ admin=$(curl -fs "$B/api/admin/secrets")
 echo "$admin" | jq -e '.kubernetes.configured and ([.kubernetes.clusters[] | select((.error // "") == "") | .environment] | sort) == ["acceptance","development","production"]' >/dev/null \
   || fail "admin overview does not list the three clusters"
 if echo "$admin" | grep -q 'eyJ'; then fail "a token reached the admin overview"; fi
-[ "$(kubectl -n "$NS" exec deploy/runwarden -- stat -L -c %a /runwarden/kube/production/config)" = "440" ] || fail "kubeconfig file mode"
+[ "$(kubectl -n "$NS" exec deploy/ward -- stat -L -c %a /ward/kube/production/config)" = "440" ] || fail "kubeconfig file mode"
 echo "concurrent development + production runs pinned to their own namespace and ServiceAccount; source context in two-environment runs; history and admin show servers, never tokens"
 
 step "Isolation between runs (Landlock)"
 # Still maxRunsPerUser=0: the victim and the attacker run at the same time. Sign-in is off, so
 # both runs belong to the same user; another user's workspace is planted next to theirs.
-ready=$(kubectl -n "$NS" exec deploy/runwarden -- bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf "GET /readyz HTTP/1.0\r\n\r\n" >&3; cat <&3')
+ready=$(kubectl -n "$NS" exec deploy/ward -- bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf "GET /readyz HTTP/1.0\r\n\r\n" >&3; cat <&3')
 echo "$ready" | grep -q 'isolation: sandboxed (Landlock ABI' || fail "readiness does not report the sandbox: $ready"
 iso=$(curl -fs "$B/api/admin/secrets" | jq -c .isolation)
 echo "$iso" | jq -e '.active and .mode == "required" and .abi >= 1' >/dev/null || fail "admin overview does not show the isolation: $iso"
 signal=open
 echo "$iso" | jq -e .signal_scoping >/dev/null && signal=blocked
-kubectl -n "$NS" exec deploy/runwarden -- sh -c 'mkdir -p -m 700 /var/lib/runwarden-work/mallory /var/lib/runwarden-work/shared && echo mallory-notes > /var/lib/runwarden-work/mallory/notes'
+kubectl -n "$NS" exec deploy/ward -- sh -c 'mkdir -p -m 700 /var/lib/ward-work/mallory /var/lib/ward-work/shared && echo mallory-notes > /var/lib/ward-work/mallory/notes'
 victim=$(curl -fs -X POST "$B/api/scripts/Isolation%20Victim/runs" -H 'Content-Type: application/json' -d '{"values":{"Environment":"production"}}' | jq -r .id) \
   || fail "victim did not start"
 line=
@@ -315,15 +315,15 @@ step "Executors (remote environment)"
 # production runs on its own executor pods (2 replicas); the server keeps development and
 # acceptance and no longer mounts production's secrets and kubeconfig.
 upgrade --set limits.maxRunsPerUser=0 --set executors.production.replicas=2
-XD=deploy/runwarden-executor-production
+XD=deploy/ward-executor-production
 kubectl -n "$NS" rollout status "$XD" --timeout 2m >/dev/null
-health() { kubectl -n "$NS" exec deploy/runwarden -- bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf "GET /readyz HTTP/1.0\r\n\r\n" >&3; cat <&3'; }
+health() { kubectl -n "$NS" exec deploy/ward -- bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; printf "GET /readyz HTTP/1.0\r\n\r\n" >&3; cat <&3'; }
 for _ in $(seq 30); do health | grep -q 'executors production: up (2 connected)' && break; sleep 1; done
 health | grep -q 'executors production: up (2 connected)' || fail "readiness does not show 2 executors: $(health)"
-kubectl -n "$NS" exec deploy/runwarden -- sh -c 'test ! -e /runwarden/secrets/production && test ! -e /runwarden/kube/production' \
+kubectl -n "$NS" exec deploy/ward -- sh -c 'test ! -e /ward/secrets/production && test ! -e /ward/kube/production' \
   || fail "production secrets or kubeconfig still mounted on the server"
-kubectl -n "$NS" exec "$XD" -- test -e /runwarden/secrets/production/DB_PASSWORD || fail "production secret not mounted on the executor"
-kubectl -n "$NS" exec "$XD" -- sh -c 'test ! -e /runwarden/secrets/development && test ! -e /runwarden/kube/development' \
+kubectl -n "$NS" exec "$XD" -- test -e /ward/secrets/production/DB_PASSWORD || fail "production secret not mounted on the executor"
+kubectl -n "$NS" exec "$XD" -- sh -c 'test ! -e /ward/secrets/development && test ! -e /ward/kube/development' \
   || fail "another environment's secrets reached the executor"
 prod=$(credentials production)
 echo "$prod" | grep -q "DB_PASSWORD: ${#PROD_DB} characters, fingerprint $(fp "$PROD_DB")" || fail "production secret wrong on the executor: $prod"
@@ -357,7 +357,7 @@ for _ in $(seq 20); do
   [ -n "$pod" ] && break; sleep 0.5
 done
 [ -n "$pod" ] || fail "no busy executor pod"
-kubectl -n "$NS" exec "$pod" -- sh -c 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = runwarden ] && kill -9 "${p#/proc/}"; done; true' >/dev/null 2>&1 || true
+kubectl -n "$NS" exec "$pod" -- sh -c 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = ward ] && kill -9 "${p#/proc/}"; done; true' >/dev/null 2>&1 || true
 status=
 for _ in $(seq 40); do status=$(curl -fs "$B/api/runs/$long" | jq -r .status); [ "$status" != running ] && break; sleep 0.5; done
 [ "$status" = failed ] || fail "run on a killed executor is $status"
@@ -365,20 +365,20 @@ curl -fs "$B/api/runs/$long/output" | grep -q 'executor connection lost' || fail
 credentials production | grep -q "DB_PASSWORD: ${#PROD_DB} characters" || fail "the remaining replica does not run production"
 # No executor connected: a clear refusal.
 kubectl -n "$NS" scale "$XD" --replicas=0 >/dev/null
-kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/name=runwarden-executor --timeout 2m >/dev/null
+kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/name=ward-executor --timeout 2m >/dev/null
 for _ in $(seq 30); do health | grep -q 'executors production: down' && break; sleep 1; done
 code=$(curl -s -o /tmp/rw-down.json -w '%{http_code}' -X POST "$B/api/scripts/Check%20Credentials/runs" \
   -H 'Content-Type: application/json' -d '{"values":{"Environment":"production"}}')
 [ "$code" = "503" ] && grep -q 'no executor is connected for environment production' /tmp/rw-down.json || fail "no executor answered $code: $(cat /tmp/rw-down.json)"
 upgrade
-if kubectl -n "$NS" get deploy runwarden-executor-production >/dev/null 2>&1; then fail "executor left after removing it from the values"; fi
+if kubectl -n "$NS" get deploy ward-executor-production >/dev/null 2>&1; then fail "executor left after removing it from the values"; fi
 echo "production ran on 2 executor replicas (secret masked there, helper, kubeconfig, stop); its mounts left the server; a killed replica failed its run; none connected: 503"
 
 step "NetworkPolicy"
 api_ip=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')
-probe() { kubectl -n "$NS" exec deploy/runwarden -- timeout 3 bash -c "echo > /dev/tcp/$api_ip/443" >/dev/null 2>&1; }
+probe() { kubectl -n "$NS" exec deploy/ward -- timeout 3 bash -c "echo > /dev/tcp/$api_ip/443" >/dev/null 2>&1; }
 probe || fail "API server not reachable before the policy (test precondition)"
-helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --set networkPolicy.enabled=true --wait --timeout 2m >/dev/null
+helm upgrade ward deploy/helm/ward -n "$NS" -f deploy/kind/values-kind.yaml --set networkPolicy.enabled=true --wait --timeout 2m >/dev/null
 blocked=
 for _ in $(seq 30); do if ! probe; then blocked=1; break; fi; sleep 1; done
 [ -n "$blocked" ] || fail "egress outside the allowlist still works"
@@ -386,12 +386,12 @@ curl -fs "$B/api/scripts" >/dev/null || fail "web port blocked by the policy"
 ID2=$(curl -fs -X POST "$B/api/scripts/Restart%20Service/runs" -H 'Content-Type: application/json' -d '{"values":{"Service":"web"}}' | jq -r .id)
 timeout 30 websocat -t --no-close "ws://127.0.0.1:$PORT/api/runs/$ID2/ws" </dev/null | jq -e 'select(.type=="result") | .status == "finished"' >/dev/null \
   || fail "run failed under the policy"
-helm upgrade runwarden deploy/helm/runwarden -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 2m >/dev/null
+helm upgrade ward deploy/helm/ward -n "$NS" -f deploy/kind/values-kind.yaml --wait --timeout 2m >/dev/null
 echo "egress outside the allowlist blocked, web port and runs still work"
 
 step "History survives a pod restart"
-kubectl -n "$NS" delete pod -l app.kubernetes.io/name=runwarden --wait=true >/dev/null
-kubectl -n "$NS" rollout status deploy/runwarden --timeout 2m >/dev/null
+kubectl -n "$NS" delete pod -l app.kubernetes.io/name=ward --wait=true >/dev/null
+kubectl -n "$NS" rollout status deploy/ward --timeout 2m >/dev/null
 forward
 curl -fs "$B/api/runs/$ID" | jq -e '.status == "finished"' >/dev/null || fail "run lost after restart"
 echo "run $ID still in history"
@@ -406,9 +406,9 @@ JAR=$(mktemp)
 code=$(curl -s -o /dev/null -w '%{http_code}' "$B/api/scripts")
 [ "$code" = "401" ] || fail "API without a session answered $code"
 curl -fs "$B/runs/x" | grep -q '<title>Sign in' || fail "signed-out page is not the sign-in page"
-pw=$(kubectl -n "$NS" exec deploy/runwarden -- cat /var/lib/runwarden/initial-admin-password)
+pw=$(kubectl -n "$NS" exec deploy/ward -- cat /var/lib/ward/initial-admin-password)
 [ "${#pw}" -ge 40 ] || fail "password file missing or short"
-if kubectl -n "$NS" logs deploy/runwarden | grep -qF "$pw"; then fail "password in the pod log"; fi
+if kubectl -n "$NS" logs deploy/ward | grep -qF "$pw"; then fail "password in the pod log"; fi
 curl -fs -c "$JAR" -X POST "$B/auth/login" -H 'Content-Type: application/json' \
   -d "{\"method\":\"local\",\"password\":\"$pw\"}" >/dev/null || fail "built-in admin sign-in failed"
 curl -fs -b "$JAR" "$B/api/me" | jq -e '.name == "admin@local" and .admin' >/dev/null || fail "not signed in as admin@local"
@@ -435,14 +435,14 @@ echo "the built-in administrator gave the devops role to alice (before her first
 upgrade --set-json 'auth.methods=["ldap"]' --set auth.ldap.url=ldaps://ldap.invalid,auth.ldap.userBaseDN=dc=example,auth.cookieSecure=false
 code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$B/api/me")
 [ "$code" = "401" ] || fail "built-in admin session still valid after disabling ($code)"
-kubectl -n "$NS" exec deploy/runwarden -- test ! -e /var/lib/runwarden/initial-admin-password || fail "password file not removed"
+kubectl -n "$NS" exec deploy/ward -- test ! -e /var/lib/ward/initial-admin-password || fail "password file not removed"
 rm -f "$JAR"
-kubectl -n "$NS" exec deploy/runwarden -- cat /var/lib/runwarden/policy.json \
+kubectl -n "$NS" exec deploy/ward -- cat /var/lib/ward/policy.json \
   | jq -e '(.rules | length == 1) and ([.users[] | select(.roles | index("devops")) | .name] == ["alice"])' >/dev/null \
   || fail "policy (rule, devops user) not kept on the data volume"
-if kubectl -n "$NS" logs deploy/runwarden | grep -q 'nobody has the devops role'; then fail "no-devops warning although alice is devops"; fi
+if kubectl -n "$NS" logs deploy/ward | grep -q 'nobody has the devops role'; then fail "no-devops warning although alice is devops"; fi
 upgrade
 echo "disabled: password file removed, admin session refused; policy and devops user kept across restarts"
 
 echo
-echo "PASS: Runwarden runs in kind"
+echo "PASS: Ward runs in kind"

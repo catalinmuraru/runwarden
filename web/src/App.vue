@@ -40,7 +40,7 @@ watch(() => route.fullPath, () => (menuOpen.value = false))
       <button class="btn btn-quiet" type="button" :aria-expanded="menuOpen" aria-controls="sidebar" @click="menuOpen = !menuOpen">
         ☰ <span class="sr-only">Scripts and menu</span>
       </button>
-      <RouterLink to="/" class="brand">Runwarden</RouterLink>
+      <RouterLink to="/" class="brand">Ward</RouterLink>
     </div>
     <ScriptSidebar id="sidebar" />
     <main class="content">

@@ -12,8 +12,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/catalinmuraru/runwarden/internal/audit"
-	"github.com/catalinmuraru/runwarden/internal/executor"
+	"github.com/catalinmuraru/ward/internal/audit"
+	"github.com/catalinmuraru/ward/internal/executor"
 )
 
 const (

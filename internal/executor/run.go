@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/params"
+	"github.com/catalinmuraru/ward/internal/params"
 )
 
 // Status is the state of a run.

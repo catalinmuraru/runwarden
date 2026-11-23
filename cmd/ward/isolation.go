@@ -7,13 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/catalinmuraru/runwarden/internal/config"
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/config"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/sandbox"
 )
 
 // Paths every sandboxed run may read: the system, without /tmp, /home, /var or /run (where
-// the service account token lives). Runwarden's own data, secrets and kubeconfigs must not be
+// the service account token lives). Ward's own data, secrets and kubeconfigs must not be
 // below any of them; see checkIsolation.
 var (
 	sandboxRead  = []string{"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/proc", "/sys", "/dev/zero", "/dev/random", "/dev/urandom"}
@@ -27,7 +27,7 @@ func newSandbox(cfg config.App, tempRoot string) (*executor.Sandbox, sandbox.Sta
 	st := sandbox.Status{Mode: cfg.Isolation}
 	if cfg.Isolation == config.IsolationOff {
 		st.Reason = "ISOLATION=off"
-		slog.Warn("isolation: runs are not sandboxed and can read each other's files and Runwarden's data", "reason", st.Reason)
+		slog.Warn("isolation: runs are not sandboxed and can read each other's files and Ward's data", "reason", st.Reason)
 		return nil, st, nil
 	}
 	detected := sandbox.Detect()
@@ -58,7 +58,7 @@ func newSandbox(cfg config.App, tempRoot string) (*executor.Sandbox, sandbox.Sta
 		if cfg.Isolation == config.IsolationRequired {
 			return nil, st, fmt.Errorf("ISOLATION=required: %s", st.Reason)
 		}
-		slog.Warn("isolation: runs are not sandboxed and can read each other's files and Runwarden's data", "reason", st.Reason)
+		slog.Warn("isolation: runs are not sandboxed and can read each other's files and Ward's data", "reason", st.Reason)
 		return nil, st, nil
 	}
 	slog.Info("isolation: runs are sandboxed with Landlock", "abi", st.ABI, "signal_scoping", st.SignalScoping)
@@ -79,7 +79,7 @@ func describeIsolation(st sandbox.Status) string {
 	return fmt.Sprintf("sandboxed (Landlock ABI %d, signals not scoped)", st.ABI)
 }
 
-// checkIsolation refuses a sandbox that would hand runs Runwarden's data, secrets, kubeconfigs
+// checkIsolation refuses a sandbox that would hand runs Ward's data, secrets, kubeconfigs
 // or the workspace root: none of them may be below a path every run can access, nor contain
 // one. Landlock has no deny rules, so this is the only protection against such a layout.
 func checkIsolation(cfg config.App, allowed []string) error {

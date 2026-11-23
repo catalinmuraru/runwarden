@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	sessionCookie = "runwarden_session"
-	loginCookie   = "runwarden_login"
+	sessionCookie = "ward_session"
+	loginCookie   = "ward_login"
 	loginTTL      = 10 * time.Minute
 )
 

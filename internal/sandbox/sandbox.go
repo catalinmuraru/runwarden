@@ -4,7 +4,7 @@
 // Landlock ABI 6 or later cannot signal them either. It needs no privileges.
 //
 // Go cannot run code between fork and exec, so the executor starts the run as
-// `runwarden sandbox-exec -- <script> <args>` with the policy in RUNWARDEN_SANDBOX; Main applies
+// `ward sandbox-exec -- <script> <args>` with the policy in WARD_SANDBOX; Main applies
 // it and execs the script in the same process (same PID, process group and terminal).
 package sandbox
 
@@ -18,10 +18,12 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+
+	"github.com/catalinmuraru/ward/internal/compat"
 )
 
 // EnvVar carries the encoded Policy to the trampoline, which removes it before the exec.
-const EnvVar = "RUNWARDEN_SANDBOX"
+const EnvVar = "WARD_SANDBOX"
 
 // Policy is what one sandboxed process may access. Paths that don't exist are skipped.
 type Policy struct {
@@ -58,7 +60,7 @@ func Detect() Status {
 		st.ABI, st.SignalScoping = 0, false
 		st.Reason = err.Error()
 	case os.Geteuid() == 0:
-		st.Reason = "runwarden runs as root, which Landlock does not isolate"
+		st.Reason = "ward runs as root, which Landlock does not isolate"
 	default:
 		st.Active = true
 	}
@@ -79,32 +81,33 @@ func Main(args []string) int {
 	// goroutine to another thread between restricting and exec'ing.
 	runtime.LockOSThread()
 	if len(args) < 2 || args[0] != "--" {
-		fmt.Fprintln(os.Stderr, "usage: runwarden sandbox-exec -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "usage: ward sandbox-exec -- <command> [args...]")
 		return 2
 	}
 	argv := args[1:]
-	raw, ok := os.LookupEnv(EnvVar)
+	raw, ok := compat.LookupEnv(os.LookupEnv, EnvVar)
 	if !ok {
-		fmt.Fprintln(os.Stderr, "runwarden sandbox: no policy in", EnvVar)
+		fmt.Fprintln(os.Stderr, "ward sandbox: no policy in", EnvVar)
 		return 126
 	}
 	var p Policy
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
-		fmt.Fprintln(os.Stderr, "runwarden sandbox: bad policy:", err)
+		fmt.Fprintln(os.Stderr, "ward sandbox: bad policy:", err)
 		return 126
 	}
 	_ = os.Unsetenv(EnvVar)
+	_ = os.Unsetenv(compat.Legacy(EnvVar))
 	if err := apply(p); err != nil {
-		fmt.Fprintln(os.Stderr, "runwarden sandbox:", err)
+		fmt.Fprintln(os.Stderr, "ward sandbox:", err)
 		return 126
 	}
 	// Commands without a slash are looked up in the script's PATH, as exec.Command does.
 	path, err := exec.LookPath(argv[0])
 	if err != nil && !errors.Is(err, exec.ErrDot) {
-		fmt.Fprintln(os.Stderr, "runwarden sandbox:", err)
+		fmt.Fprintln(os.Stderr, "ward sandbox:", err)
 		return 127
 	}
 	err = syscall.Exec(path, argv, os.Environ()) //nolint:gosec // argv from a validated config, no shell
-	fmt.Fprintf(os.Stderr, "runwarden sandbox: exec %s: %v\n", argv[0], err)
+	fmt.Fprintf(os.Stderr, "ward sandbox: exec %s: %v\n", argv[0], err)
 	return 127
 }

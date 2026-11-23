@@ -35,7 +35,7 @@ defineExpose({ load })
   <template v-else>
     <h2>Isolation between runs</h2>
     <p class="muted">
-      Each run is sandboxed: it cannot read other runs' files or environment, other users' workspaces, Runwarden's data or the
+      Each run is sandboxed: it cannot read other runs' files or environment, other users' workspaces, Ward's data or the
       mounted secrets. Set with <code>ISOLATION</code>.
     </p>
     <p v-if="isolation" :class="['badge', `tone-${isolation.tone}`]" data-testid="isolation">{{ isolation.text }}</p>

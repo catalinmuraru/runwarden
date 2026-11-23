@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// The test binary doubles as the trampoline, as runwarden does.
+// The test binary doubles as the trampoline, as ward does.
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "sandbox-exec" {
 		os.Exit(Main(os.Args[2:]))
@@ -119,10 +119,10 @@ func TestWithin(t *testing.T) {
 		want      bool
 	}{
 		{"/etc", "/etc", true},
-		{"/etc", "/etc/runwarden/secrets", true},
+		{"/etc", "/etc/ward/secrets", true},
 		{"/etc/", "/etc/x/../y", true},
 		{"/etc", "/etcetera", false},
-		{"/var/lib/runwarden", "/var/lib", false},
+		{"/var/lib/ward", "/var/lib", false},
 		{"/", "/anything", true},
 	}
 	for _, tt := range tests {

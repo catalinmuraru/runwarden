@@ -20,7 +20,7 @@ func homeScript(t *testing.T, context, sleep string) *Request {
 
 func TestPrivateHomePerRun(t *testing.T) {
 	root, skel := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(skel, ".gitconfig"), []byte("[user]\n\tname = runwarden\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(skel, ".gitconfig"), []byte("[user]\n\tname = ward\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	secret := filepath.Join(t.TempDir(), "secret")
@@ -46,7 +46,7 @@ func TestPrivateHomePerRun(t *testing.T) {
 		home := filepath.Join(root, c.r.ID, "home")
 		for _, want := range []string{"home=" + home, "kubeconfig=" + filepath.Join(home, ".kube", "config"),
 			"azure=" + filepath.Join(home, ".azure"), "tmp=" + filepath.Join(root, c.r.ID, "tmp"),
-			"name = runwarden", "kube=context: " + c.ctx} {
+			"name = ward", "kube=context: " + c.ctx} {
 			if !strings.Contains(out, want) {
 				t.Errorf("run %s: missing %q in\n%s", c.ctx, want, out)
 			}
@@ -72,7 +72,7 @@ func TestPrivateHomePerRun(t *testing.T) {
 	}
 }
 
-func TestSharedHomeKeepsRunwardenHome(t *testing.T) {
+func TestSharedHomeKeepsWardHome(t *testing.T) {
 	t.Setenv("HOME", "/home/shared")
 	e := New(Limits{}, EnvPolicy{TempRoot: t.TempDir()})
 	r := mustStart(t, e, *homeScript(t, "x", "0"))
@@ -112,9 +112,9 @@ func TestKubeconfigPerRun(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(skel, ".kube", "config"), []byte("skeleton"), 0o600)
 	e := New(Limits{}, EnvPolicy{TempRoot: root, PrivateHome: true, HomeSkeleton: skel})
 	dev := mustStart(t, e, kubeRequest(t, "0.5", &Kube{Config: []byte("dev-config"),
-		Env: map[string]string{"RUNWARDEN_KUBE_CONTEXT": "development"}}))
+		Env: map[string]string{"WARD_KUBE_CONTEXT": "development"}}))
 	prod := mustStart(t, e, kubeRequest(t, "0", &Kube{Config: []byte("prod-config"),
-		Env: map[string]string{"RUNWARDEN_KUBE_CONTEXT": "production", "RUNWARDEN_KUBE_SOURCE_CONTEXT": "development"}}))
+		Env: map[string]string{"WARD_KUBE_CONTEXT": "production", "WARD_KUBE_SOURCE_CONTEXT": "development"}}))
 	plain := mustStart(t, e, kubeRequest(t, "0", nil))
 	waitDone(t, prod)
 	waitDone(t, dev)
@@ -148,7 +148,7 @@ func TestCaptureKubeconfig(t *testing.T) {
 	e := New(Limits{}, EnvPolicy{TempRoot: t.TempDir(), PrivateHome: true})
 	script, _ := filepath.Abs("testdata/kube.sh")
 	out, err := e.Capture(t.Context(), script, []string{"0"}, t.TempDir(), nil,
-		&Kube{Config: []byte("helper-config"), Env: map[string]string{"RUNWARDEN_KUBE_CONTEXT": "acceptance"}})
+		&Kube{Config: []byte("helper-config"), Env: map[string]string{"WARD_KUBE_CONTEXT": "acceptance"}})
 	if err != nil {
 		t.Fatal(err)
 	}

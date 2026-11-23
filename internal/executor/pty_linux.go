@@ -21,7 +21,7 @@ const (
 )
 
 // openPTY opens a new pseudo-terminal pair of the given size (zero: the default): master
-// (Runwarden's side, read for output and written for input) and tty (the script's terminal).
+// (Ward's side, read for output and written for input) and tty (the script's terminal).
 func openPTY(rows, cols int) (master, tty *os.File, err error) {
 	master, err = os.OpenFile("/dev/ptmx", os.O_RDWR|syscall.O_NOCTTY|syscall.O_CLOEXEC, 0)
 	if err != nil {

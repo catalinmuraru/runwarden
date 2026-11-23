@@ -16,8 +16,8 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/catalinmuraru/runwarden/internal/audit"
-	"github.com/catalinmuraru/runwarden/internal/clientip"
+	"github.com/catalinmuraru/ward/internal/audit"
+	"github.com/catalinmuraru/ward/internal/clientip"
 )
 
 // Method is one way to sign in, offered on the sign-in page.

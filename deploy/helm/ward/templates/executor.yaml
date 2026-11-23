@@ -4,13 +4,13 @@
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$" $env) }}
 {{- fail (printf "executors: invalid environment name %q" $env) }}
 {{- end }}
-{{- $slug := include "runwarden.envSlug" $env }}
+{{- $slug := include "ward.envSlug" $env }}
 {{- if hasKey $slugs $slug }}
 {{- fail (printf "executors: environments %q and %q get the same resource name (%s)" (get $slugs $slug) $env $slug) }}
 {{- end }}
 {{- $_ := set $slugs $slug $env }}
 {{- $ctx := dict "root" $ "env" $env }}
-{{- $name := include "runwarden.executorName" $ctx }}
+{{- $name := include "ward.executorName" $ctx }}
 {{- $token := $x.token | default dict }}
 {{- $ws := $x.workspace | default dict }}
 {{- $sa := $x.serviceAccount | default dict }}
@@ -22,10 +22,10 @@ kind: Secret
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+    {{- include "ward.executorLabels" $ctx | nindent 4 }}
 type: Opaque
 data:
-  token: {{ include "runwarden.executorToken" $ctx | b64enc | quote }}
+  token: {{ include "ward.executorToken" $ctx | b64enc | quote }}
 {{- end }}
 {{- if ne (toString $sa.create) "false" }}
 ---
@@ -34,7 +34,7 @@ kind: ServiceAccount
 metadata:
   name: {{ $saName }}
   labels:
-    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+    {{- include "ward.executorLabels" $ctx | nindent 4 }}
   {{- with $sa.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -48,7 +48,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ $name }}-workspace
   labels:
-    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+    {{- include "ward.executorLabels" $ctx | nindent 4 }}
   {{- if ne (toString $ws.keepOnUninstall) "false" }}
   annotations:
     helm.sh/resource-policy: keep
@@ -69,7 +69,7 @@ kind: Deployment
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+    {{- include "ward.executorLabels" $ctx | nindent 4 }}
 spec:
   replicas: {{ hasKey $x "replicas" | ternary $x.replicas 1 }}
   # A replica that stops stops its runs, so a new one is connected before an old one goes.
@@ -80,17 +80,17 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      {{- include "runwarden.executorSelectorLabels" $ctx | nindent 6 }}
+      {{- include "ward.executorSelectorLabels" $ctx | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "runwarden.executorSelectorLabels" $ctx | nindent 8 }}
+        {{- include "ward.executorSelectorLabels" $ctx | nindent 8 }}
         {{- with $x.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
         # A new token rolls the pods, which otherwise keep the old one and are refused.
-        checksum/token: {{ include "runwarden.executorTokenSha256" $ctx }}
+        checksum/token: {{ include "ward.executorTokenSha256" $ctx }}
         # Executors run only scripts of their own runner configs: they roll with the server's.
         checksum/runners: {{ toJson $.Values.runners.configs | sha256sum }}
         {{- with $x.podAnnotations }}
@@ -113,7 +113,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: executor
-          image: {{ include "runwarden.image" $ | quote }}
+          image: {{ include "ward.image" $ | quote }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           args: ["executor"]
           ports:
@@ -121,12 +121,12 @@ spec:
               containerPort: 8081
           env:
             {{- $e := dict }}
-            {{- include "runwarden.runSettings" (dict "root" $ "env" $e) }}
+            {{- include "ward.runSettings" (dict "root" $ "env" $e) }}
             {{- $_ := set $e "EXECUTOR_ENVIRONMENT" $env }}
-            {{- $_ := set $e "EXECUTOR_SERVER_URL" ($x.serverUrl | default (printf "http://%s.%s.svc:%v" (include "runwarden.fullname" $) $.Release.Namespace $.Values.service.port)) }}
+            {{- $_ := set $e "EXECUTOR_SERVER_URL" ($x.serverUrl | default (printf "http://%s.%s.svc:%v" (include "ward.fullname" $) $.Release.Namespace $.Values.service.port)) }}
             {{- $_ := set $e "MAX_CONCURRENT_RUNS" (toString ($x.maxConcurrentRuns | default $.Values.limits.maxConcurrentRuns)) }}
-            {{- if $ws.enabled }}{{ $_ := set $e "WORKSPACE_DIR" "/var/lib/runwarden-work" }}{{ end }}
-            {{- include "runwarden.envList" $e | nindent 12 }}
+            {{- if $ws.enabled }}{{ $_ := set $e "WORKSPACE_DIR" "/var/lib/ward-work" }}{{ end }}
+            {{- include "ward.envList" $e | nindent 12 }}
             - name: EXECUTOR_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -165,38 +165,38 @@ spec:
           {{- end }}
           volumeMounts:
             - name: data
-              mountPath: /var/lib/runwarden
+              mountPath: /var/lib/ward
             - name: tmp
               mountPath: /tmp
             - name: home
-              mountPath: /home/runwarden
+              mountPath: /home/ward
             {{- if $ws.enabled }}
             - name: workspace
-              mountPath: /var/lib/runwarden-work
+              mountPath: /var/lib/ward-work
             {{- end }}
             {{- if $.Values.runners.configs }}
             - name: runners
-              mountPath: /runwarden/runners
+              mountPath: /ward/runners
               readOnly: true
             {{- end }}
             {{- if $.Values.runs.homeSkeletonConfigMap }}
             - name: home-skeleton
-              mountPath: /runwarden/home-skeleton
+              mountPath: /ward/home-skeleton
               readOnly: true
             {{- end }}
             {{- if $.Values.secrets.common }}
             - name: secrets-common
-              mountPath: /runwarden/secrets/common
+              mountPath: /ward/secrets/common
               readOnly: true
             {{- end }}
             {{- if index $.Values.secrets.environments $env }}
             - name: secrets
-              mountPath: /runwarden/secrets/{{ $env }}
+              mountPath: /ward/secrets/{{ $env }}
               readOnly: true
             {{- end }}
             {{- if index $.Values.kube.environments $env }}
             - name: kube
-              mountPath: /runwarden/kube/{{ $env }}
+              mountPath: /ward/kube/{{ $env }}
               readOnly: true
             {{- end }}
             {{- with $x.extraVolumeMounts }}
@@ -218,7 +218,7 @@ spec:
         {{- if $.Values.runners.configs }}
         - name: runners
           configMap:
-            name: {{ include "runwarden.fullname" $ }}-runners
+            name: {{ include "ward.fullname" $ }}-runners
         {{- end }}
         {{- with $.Values.runs.homeSkeletonConfigMap }}
         - name: home-skeleton
@@ -268,11 +268,11 @@ kind: NetworkPolicy
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "runwarden.executorLabels" $ctx | nindent 4 }}
+    {{- include "ward.executorLabels" $ctx | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "runwarden.executorSelectorLabels" $ctx | nindent 6 }}
+      {{- include "ward.executorSelectorLabels" $ctx | nindent 6 }}
   policyTypes: [Ingress, Egress]
   # Nothing connects to an executor (it dials out): only the kubelet's probes.
   ingress:
@@ -282,7 +282,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              {{- include "runwarden.selectorLabels" $ | nindent 14 }}
+              {{- include "ward.selectorLabels" $ | nindent 14 }}
       ports:
         - port: 8080
     {{- if $.Values.networkPolicy.egress.dns }}

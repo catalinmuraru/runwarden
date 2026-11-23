@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   server: {
-    // `npm run dev` talks to a locally running `go run ./cmd/runwarden`.
+    // `npm run dev` talks to a locally running `go run ./cmd/ward`.
     proxy: {
       '/api': { target: 'http://localhost:8080', ws: true },
       '/auth': { target: 'http://localhost:8080' },

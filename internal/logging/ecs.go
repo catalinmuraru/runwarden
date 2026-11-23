@@ -1,4 +1,4 @@
-// Package logging writes Runwarden's logs as JSON lines in Elastic Common Schema (ECS), so
+// Package logging writes Ward's logs as JSON lines in Elastic Common Schema (ECS), so
 // Filebeat can ship them without custom parsing.
 package logging
 
@@ -14,15 +14,15 @@ import (
 const ECSVersion = "8.11.0"
 
 // Dataset of application logs; audit events use their own (see internal/audit).
-const appDataset = "runwarden.app"
+const appDataset = "ward.app"
 
 // ecsRoots are top-level keys that are already ECS fields (or groups of them). Any other key is
-// a custom field and is moved under "runwarden.", as ECS recommends for custom fields.
+// a custom field and is moved under "ward.", as ECS recommends for custom fields.
 var ecsRoots = map[string]bool{
 	"@timestamp": true, "log.level": true, "message": true, "ecs.version": true,
 	"event": true, "user": true, "source": true, "user_agent": true, "process": true,
 	"error.message": true, "error": true, "service": true, "url": true, "http": true,
-	"labels": true, "runwarden": true,
+	"labels": true, "ward": true,
 }
 
 // NewECSHandler returns a handler writing ECS JSON lines to w.
@@ -30,14 +30,14 @@ func NewECSHandler(w io.Writer, version string, level slog.Leveler) slog.Handler
 	inner := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level, ReplaceAttr: replaceBuiltins})
 	return &ecsHandler{inner: inner.WithAttrs([]slog.Attr{
 		slog.String("ecs.version", ECSVersion),
-		slog.Group("service", slog.String("name", "runwarden"), slog.String("version", version)),
+		slog.Group("service", slog.String("name", "ward"), slog.String("version", version)),
 	})}
 }
 
 type ecsHandler struct {
 	inner slog.Handler
 	// custom holds non-ECS attributes from With; they are merged with the record's own custom
-	// attributes so each line has a single "runwarden" object (duplicate keys would be lost).
+	// attributes so each line has a single "ward" object (duplicate keys would be lost).
 	custom []slog.Attr
 }
 
@@ -89,11 +89,11 @@ func split(attrs []slog.Attr) (ecs, custom []slog.Attr) {
 	return ecs, custom
 }
 
-// namespace returns the ECS attributes plus one "runwarden" group with all custom ones.
+// namespace returns the ECS attributes plus one "ward" group with all custom ones.
 func namespace(attrs []slog.Attr) []slog.Attr {
 	ecs, custom := split(attrs)
 	if len(custom) > 0 {
-		ecs = append(ecs, slog.Attr{Key: "runwarden", Value: slog.GroupValue(custom...)})
+		ecs = append(ecs, slog.Attr{Key: "ward", Value: slog.GroupValue(custom...)})
 	}
 	return ecs
 }

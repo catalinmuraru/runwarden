@@ -73,6 +73,6 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          helm package deploy/helm/runwarden --version "$version" --app-version "$version"
+          helm package deploy/helm/ward --version "$version" --app-version "$version"
           echo "$TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
-          helm push "runwarden-${version}.tgz" "oci://ghcr.io/${OWNER,,}/charts"
+          helm push "ward-${version}.tgz" "oci://ghcr.io/${OWNER,,}/charts"

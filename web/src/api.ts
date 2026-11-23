@@ -1,4 +1,4 @@
-// Typed client for the Runwarden API.
+// Typed client for the Ward API.
 
 export interface Me {
   name: string

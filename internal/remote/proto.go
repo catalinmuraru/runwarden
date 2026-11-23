@@ -16,10 +16,10 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/executor"
-	"github.com/catalinmuraru/runwarden/internal/kube"
-	"github.com/catalinmuraru/runwarden/internal/sandbox"
-	"github.com/catalinmuraru/runwarden/internal/secrets"
+	"github.com/catalinmuraru/ward/internal/executor"
+	"github.com/catalinmuraru/ward/internal/kube"
+	"github.com/catalinmuraru/ward/internal/sandbox"
+	"github.com/catalinmuraru/ward/internal/secrets"
 )
 
 // Path is where executors connect on the server.
@@ -27,7 +27,7 @@ const Path = "/api/executors/connect"
 
 // EnvironmentHeader names the environment an executor registers for; the bearer token in
 // Authorization must be that environment's executor token.
-const EnvironmentHeader = "X-Runwarden-Environment"
+const EnvironmentHeader = "X-Ward-Environment"
 
 // Protocol is the version of the message set below. Server and executor must agree.
 const Protocol = 2

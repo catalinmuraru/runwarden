@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/catalinmuraru/runwarden/internal/activity"
-	"github.com/catalinmuraru/runwarden/internal/audit"
-	"github.com/catalinmuraru/runwarden/internal/auth"
+	"github.com/catalinmuraru/ward/internal/activity"
+	"github.com/catalinmuraru/ward/internal/audit"
+	"github.com/catalinmuraru/ward/internal/auth"
 )
 
 // adminOnly hides fn from everyone but global admins: others get the same 404 as for unknown
