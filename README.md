@@ -619,7 +619,7 @@ so tool and script updates stay separate from Ward updates
 ([examples/Dockerfile](examples/Dockerfile)):
 
 ```dockerfile
-FROM ghcr.io/catalinmuraru/ward:0.5.0
+FROM ghcr.io/catalinmuraru/ward:0.6.0
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends curl jq && rm -rf /var/lib/apt/lists/*
 USER 10001:10001

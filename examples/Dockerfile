@@ -1,9 +1,9 @@
 # Example scripts image: how a scripts repository builds on the Ward base image.
 # Scripts, their tools and runner configs live in this layer; Ward updates only change BASE.
 #
-#   docker build -f examples/Dockerfile --build-arg BASE=ghcr.io/catalinmuraru/ward:0.5.0 -t my-scripts .
+#   docker build -f examples/Dockerfile --build-arg BASE=ghcr.io/catalinmuraru/ward:0.6.0 -t my-scripts .
 
-ARG BASE=ghcr.io/catalinmuraru/ward:0.5.0
+ARG BASE=ghcr.io/catalinmuraru/ward:0.6.0@sha256:20c6dbfd57857f7dced2bee66eb698fda3133d672a1e4ccea94e61d2eeb847e5
 FROM ${BASE}
 
 # Install the tools your scripts need here, e.g.:
