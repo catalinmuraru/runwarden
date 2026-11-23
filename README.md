@@ -777,6 +777,11 @@ Pushing a tag `vX.Y.Z` on `main` builds and publishes the multi-arch image
 (`X.Y.Z`, `X.Y`, `latest`, with SBOM and provenance) and the Helm chart
 (`oci://ghcr.io/catalinmuraru/charts/runwarden`, version `X.Y.Z`).
 
+Patch releases are also cut automatically every Tuesday: if `main` has commits since the latest
+`vX.Y.Z` tag and CI on `main` is green, the auto patch release workflow tags `vX.Y.(Z+1)` and
+runs the release on it, so published images pick up dependency and security updates. It can also
+be started by hand from the Actions tab. Minor and major releases stay manual tags.
+
 ## Security model
 
 - Scripts are executed directly with an argument array, never through a shell-built command line.

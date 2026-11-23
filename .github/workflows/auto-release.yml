@@ -1,0 +1,52 @@
+name: Auto patch release
+
+# Weekly: if main has commits since the latest vX.Y.Z tag and CI on main's head is green,
+# tag vX.Y.(Z+1) and run the release workflow on it, so published images pick up dependency
+# and security updates without a manual release. Minor and major releases stay manual.
+on:
+  schedule:
+    - cron: "47 6 * * 2" # Tuesday, after Monday's lock file maintenance and the daily CI run
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag and release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag
+      actions: write # dispatch the release workflow (tags pushed with GITHUB_TOKEN trigger nothing)
+    steps:
+      - name: Tag next patch version if main changed and CI is green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/$REPO/git/matching-refs/tags/v" --jq '.[].ref' \
+            | sed 's#refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -z "$latest" ]; then echo "No vX.Y.Z tag yet; nothing to do."; exit 0; fi
+          sha=$(gh api "repos/$REPO/commits/$BRANCH" --jq .sha)
+          ahead=$(gh api "repos/$REPO/compare/$latest...$sha" --jq .ahead_by)
+          if [ "$ahead" = "0" ]; then echo "$BRANCH has no commits since $latest."; exit 0; fi
+          ci=$(gh run list -R "$REPO" --workflow ci.yml --commit "$sha" --status completed \
+            --limit 1 --json conclusion --jq '.[0].conclusion // ""')
+          if [ "$ci" != "success" ]; then
+            echo "::error::CI on $BRANCH ($sha) is '${ci:-not run}'; not releasing."
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          next="v$major.$minor.$((patch + 1))"
+          tag_sha=$(gh api "repos/$REPO/git/tags" -f tag="$next" -f object="$sha" -f type=commit \
+            -f message="$next: $ahead commit(s) since $latest" --jq .sha)
+          gh api "repos/$REPO/git/refs" -f ref="refs/tags/$next" -f sha="$tag_sha" > /dev/null
+          gh workflow run release.yml -R "$REPO" --ref "$next"
+          echo "Tagged $next at $sha ($ahead commit(s) since $latest) and started the release." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
