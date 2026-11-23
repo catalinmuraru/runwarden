@@ -47,6 +47,7 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache-filters: runtime # always re-run apt-get upgrade for current security fixes
 
   chart:
     name: Helm chart
