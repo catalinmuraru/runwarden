@@ -4,12 +4,17 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Daily run on main: new CVEs in dependencies or base images fail here
+  # (and notify) instead of surfacing first as blocked update PRs.
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -114,6 +119,7 @@ jobs:
           build-args: VERSION=ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache-filters: runtime # always re-run apt-get upgrade for current security fixes
       - name: Smoke test
         run: |
           docker run --rm runwarden:ci version

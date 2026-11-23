@@ -800,7 +800,9 @@ Pushing a tag `vX.Y.Z` on `main` builds and publishes the multi-arch image
 - **Backend:** Go, standard library `net/http` and `log/slog`, minimal dependencies.
 - **Frontend:** Vue 3, Vite and TypeScript, built and embedded into the binary with `go:embed`.
 - **Deployment:** container image on GHCR and a Helm chart.
-- **Maintenance:** all dependencies pinned and updated through Renovate.
+- **Maintenance:** all dependencies pinned and updated through Renovate. Security, patch, minor
+  and digest updates merge automatically once CI is green; major updates wait for review. CI also
+  runs daily on `main`, and every image build applies current Debian security updates.
 
 ## Development
 

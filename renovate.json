@@ -28,11 +28,14 @@
   "minimumReleaseAge": "3 days",
   "vulnerabilityAlerts": {
     "enabled": true,
-    "labels": ["security"]
+    "labels": ["security"],
+    "minimumReleaseAge": "0 days",
+    "automerge": true
   },
   "osvVulnerabilityAlerts": true,
   "lockFileMaintenance": {
     "enabled": true,
+    "automerge": true,
     "schedule": ["before 6am on monday"]
   },
   "packageRules": [
@@ -98,8 +101,14 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Automerge patch updates once CI is green. A group PR only automerges if every update in it is a patch.",
-      "matchUpdateTypes": ["patch"],
+      "description": "The runtime base image gets its own PR so its security digests are not held back by other images in the group.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["debian"],
+      "groupName": "Runtime base image"
+    },
+    {
+      "description": "Automerge everything except major updates once CI is green. A group PR only automerges if every update in it qualifies.",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "automerge": true
     }
   ]
