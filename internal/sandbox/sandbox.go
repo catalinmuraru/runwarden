@@ -18,8 +18,6 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-
-	"github.com/catalinmuraru/ward/internal/compat"
 )
 
 // EnvVar carries the encoded Policy to the trampoline, which removes it before the exec.
@@ -85,7 +83,7 @@ func Main(args []string) int {
 		return 2
 	}
 	argv := args[1:]
-	raw, ok := compat.LookupEnv(os.LookupEnv, EnvVar)
+	raw, ok := os.LookupEnv(EnvVar)
 	if !ok {
 		fmt.Fprintln(os.Stderr, "ward sandbox: no policy in", EnvVar)
 		return 126
@@ -96,7 +94,6 @@ func Main(args []string) int {
 		return 126
 	}
 	_ = os.Unsetenv(EnvVar)
-	_ = os.Unsetenv(compat.Legacy(EnvVar))
 	if err := apply(p); err != nil {
 		fmt.Fprintln(os.Stderr, "ward sandbox:", err)
 		return 126

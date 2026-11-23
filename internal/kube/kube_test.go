@@ -137,7 +137,7 @@ func TestResolveTarget(t *testing.T) {
 			d.Users[0].User.Exec.ProvideClusterInfo == nil || *d.Users[0].User.Exec.ProvideClusterInfo {
 			t.Errorf("%s: users = %+v (exec must be kept as is)", env, d.Users)
 		}
-		if res.Env[ContextVar] != env || res.Env["RUNWARDEN_KUBE_CONTEXT"] != env || len(res.Env) != 2 {
+		if res.Env[ContextVar] != env || len(res.Env) != 1 {
 			t.Errorf("%s: env = %v", env, res.Env)
 		}
 		if len(res.Clusters) != 1 || res.Clusters[0].Server != server || res.Clusters[0].Environment != env {

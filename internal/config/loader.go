@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/catalinmuraru/ward/internal/compat"
 	"github.com/catalinmuraru/ward/internal/params"
 )
 
@@ -284,7 +283,7 @@ func checkSecretName(name string) error {
 		return fmt.Errorf("%q must be an upper-case variable name (A-Z, 0-9, _)", name)
 	case strings.HasPrefix(name, "SOURCE_"):
 		return fmt.Errorf("%q: the SOURCE_ prefix is added for the source environment's secrets", name)
-	case strings.HasPrefix(name, "LD_"), strings.HasPrefix(name, "BASH_"), strings.HasPrefix(name, "WARD_"), strings.HasPrefix(name, compat.LegacyPrefix):
+	case strings.HasPrefix(name, "LD_"), strings.HasPrefix(name, "BASH_"), strings.HasPrefix(name, "WARD_"):
 		return fmt.Errorf("%q is reserved", name)
 	}
 	switch name {

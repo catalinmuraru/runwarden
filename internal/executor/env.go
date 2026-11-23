@@ -1,12 +1,9 @@
 package executor
 
 import (
-	"maps"
 	"os"
 	"slices"
 	"strings"
-
-	"github.com/catalinmuraru/ward/internal/compat"
 )
 
 // DefaultPath is the PATH scripts get when Ward's own environment has none.
@@ -50,12 +47,6 @@ func (p EnvPolicy) withDefaults() EnvPolicy {
 // Ward itself. Parameter variables that could change how the script or its interpreter
 // runs, or spoof a secret or a fixed variable, are refused and returned by name.
 func (p EnvPolicy) build(paramEnv, secrets, fixed map[string]string) (env []string, refused []string) {
-	// v0.5: scripts get each WARD_ variable under its former RUNWARDEN_ name too.
-	fixed = maps.Clone(fixed)
-	if fixed == nil {
-		fixed = map[string]string{}
-	}
-	compat.ExportBoth(fixed)
 	vars := map[string]string{}
 	for _, name := range p.Allow {
 		if v, ok := os.LookupEnv(name); ok {
@@ -104,10 +95,6 @@ func deniedEnv(name string) bool {
 	switch name {
 	case "PATH", "HOME", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "PS4", "PROMPT_COMMAND", "WARD_USER", "TMPDIR", "TERM",
 		"KUBECONFIG", "AZURE_CONFIG_DIR", "WARD_WORKSPACE", "WARD_SHARED", "WARD_SANDBOX", "":
-		return true
-	}
-	switch name { // v0.5: the former names are exported too
-	case compat.LegacyPrefix + "USER", compat.LegacyPrefix + "WORKSPACE", compat.LegacyPrefix + "SHARED", compat.LegacyPrefix + "SANDBOX":
 		return true
 	}
 	return strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "BASH_FUNC_")
