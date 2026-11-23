@@ -24,7 +24,7 @@ COPY --from=ui /src/internal/web/dist ./internal/web/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/runwarden ./cmd/runwarden
 
-FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="runwarden" \
       org.opencontainers.image.description="Web UI to run scripts with parameters, live output, history and access control" \
