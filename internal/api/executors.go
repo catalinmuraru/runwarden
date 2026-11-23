@@ -15,6 +15,7 @@ import (
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/history"
 	"github.com/catalinmuraru/runwarden/internal/kube"
+	"github.com/catalinmuraru/runwarden/internal/params"
 	"github.com/catalinmuraru/runwarden/internal/remote"
 	"github.com/catalinmuraru/runwarden/internal/sandbox"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
@@ -63,7 +64,8 @@ func (s *Server) pick(env string) (*remote.Conn, error) {
 }
 
 // startRemote starts req on an executor of env and tracks it like a local run. The executor
-// adds the environment's secrets and kubeconfig; the uploaded files travel with the start.
+// runs its own config of the script with the parameter values and adds the environment's
+// secrets and kubeconfig; the uploaded files travel with the start.
 func (s *Server) startRemote(ctx context.Context, env string, req executor.Request) (*executor.Run, []history.Cluster, error) {
 	files, err := readUploads(req.Uploads)
 	if err != nil {
@@ -75,8 +77,7 @@ func (s *Server) startRemote(ctx context.Context, env string, req executor.Reque
 		if err != nil {
 			return nil, err
 		}
-		run, cl, err := conn.Start(ctx, s.exec.Job(req), remote.StartOptions{
-			Secrets: req.Script.Secrets, Kubernetes: req.Script.Kubernetes, Files: files})
+		run, cl, err := conn.Start(ctx, s.exec.Job(req), remote.StartOptions{ConfigHash: req.Script.Hash(), Files: files})
 		switch {
 		case err == nil, errors.Is(err, executor.ErrBusy):
 		case errors.Is(err, remote.ErrLost):
@@ -117,16 +118,32 @@ func readUploads(dir string) ([]remote.File, error) {
 	return files, err
 }
 
+// helperCall is a helper command of a parameter (kind: config.HelperValues or
+// config.HelperDefault) with the validated values of the parameters its template references.
+type helperCall struct {
+	param  *params.Parameter
+	kind   string
+	values map[string]string
+}
+
 // runHelper runs a helper command (dropdown values, defaults) of sc for the environment the raw
-// values select: on that environment's executor, or here with its secrets and kubeconfig.
-func (s *Server) runHelper(ctx context.Context, sc *config.Script, raw func(string) (any, bool), args []string) ([]byte, error) {
-	args = s.resolveCommand(args)
+// values select: on that environment's executor, which expands its own config's template with
+// the same values, or here with its secrets and kubeconfig.
+func (s *Server) runHelper(ctx context.Context, sc *config.Script, raw func(string) (any, bool), h helperCall) ([]byte, error) {
+	program, args, err := config.ExpandProgram(config.Helper(h.param, h.kind), func(name string) (string, bool) {
+		v, ok := h.values[name]
+		return v, ok
+	})
+	if err != nil {
+		return nil, err
+	}
+	program = config.ResolveProgram(s.opts.BaseDir, program)
 	uses := s.helperUses(sc, raw)
 	env, onExecutor, err := s.executorEnv(uses)
 	if err != nil {
 		return nil, err
 	}
-	key := sc.WorkingDirectory + "\x00" + strings.Join(args, "\x00")
+	key := sc.WorkingDirectory + "\x00" + program + "\x00" + strings.Join(args, "\x00")
 	if onExecutor {
 		// The executor resolves the secrets itself: the environment keys the cache.
 		key = "executor:" + env + "\x00" + key + "\x00" + strings.Join(sc.Secrets, ",") + fmt.Sprint(sc.Kubernetes)
@@ -135,7 +152,8 @@ func (s *Server) runHelper(ctx context.Context, sc *config.Script, raw func(stri
 			if err != nil {
 				return nil, err
 			}
-			out, err := conn.Capture(ctx, args, sc.WorkingDirectory, sc.Secrets, sc.Kubernetes)
+			out, err := conn.Capture(ctx, remote.Capture{Script: sc.Name, Param: h.param.Name, Kind: h.kind,
+				Values: h.values, ConfigHash: sc.Hash()})
 			if errors.Is(err, remote.ErrLost) {
 				err = fmt.Errorf("%w for environment %s", errNoExecutor, env)
 			}
@@ -148,7 +166,7 @@ func (s *Server) runHelper(ctx context.Context, sc *config.Script, raw func(stri
 	}
 	key += "\x00" + fingerprint(sec) + "\x00" + kubeFingerprint(kc)
 	return s.capture(ctx, key, func(ctx context.Context) ([]byte, error) {
-		return s.exec.Capture(ctx, args, sc.WorkingDirectory, sec, kc)
+		return s.exec.Capture(ctx, program, args, sc.WorkingDirectory, sec, kc)
 	})
 }
 

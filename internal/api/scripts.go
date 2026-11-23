@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -202,12 +201,9 @@ func (s *Server) scriptDefault(ctx context.Context, sc *config.Script, p *params
 	if len(config.Placeholders(p.DefaultScript)) > 0 {
 		return params.Value{}
 	}
-	args, err := config.ExpandCommand(p.DefaultScript, func(string) (string, bool) { return "", false })
-	if err != nil {
-		return params.Value{}
-	}
 	// Defaults are computed before the user chose anything: the environment of the defaults.
-	out, err := s.runHelper(ctx, sc, func(string) (any, bool) { return nil, false }, args)
+	out, err := s.runHelper(ctx, sc, func(string) (any, bool) { return nil, false },
+		helperCall{param: p, kind: config.HelperDefault})
 	if err != nil {
 		slog.Warn("default script failed", "script", sc.Name, "parameter", p.Name, "err", err)
 		return params.Value{}
@@ -305,6 +301,7 @@ func writeValuesError(w http.ResponseWriter, err error) {
 // (client input) or the other parameter's default, after validating them with their own rules.
 func (s *Server) dynamicValues(ctx context.Context, sc *config.Script, p *params.Parameter, raw func(string) (any, bool)) ([]string, error) {
 	var problems []string
+	values := map[string]string{}
 	lookup := func(name string) (string, bool) {
 		dep := sc.Parameter(name)
 		if dep == nil {
@@ -328,29 +325,21 @@ func (s *Server) dynamicValues(ctx context.Context, sc *config.Script, p *params
 			problems = append(problems, fmt.Sprintf("parameter %q needs a value first", name))
 			return "", true
 		}
-		return argString(dep, v), true
+		values[name] = argString(dep, v)
+		return values[name], true
 	}
-	args, err := config.ExpandCommand(p.ValuesScript, lookup)
+	_, err := config.ExpandCommand(p.ValuesScript, lookup)
 	if len(problems) > 0 {
 		return nil, &dependencyError{problems: problems}
 	}
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.runHelper(ctx, sc, raw, args)
+	out, err := s.runHelper(ctx, sc, raw, helperCall{param: p, kind: config.HelperValues, values: values})
 	if err != nil {
 		return nil, err
 	}
 	return splitLines(out), nil
-}
-
-// resolveCommand makes a relative helper path absolute against the base dir, as the config
-// loader does for script paths. Bare names are looked up in PATH.
-func (s *Server) resolveCommand(args []string) []string {
-	if len(args) > 0 && !filepath.IsAbs(args[0]) && strings.ContainsAny(args[0], `/\`) {
-		args[0] = filepath.Join(s.opts.BaseDir, args[0])
-	}
-	return args
 }
 
 func argString(p *params.Parameter, v params.Value) string {

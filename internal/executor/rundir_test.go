@@ -86,7 +86,7 @@ func TestCapturePrivateHome(t *testing.T) {
 	root := t.TempDir()
 	e := New(Limits{}, EnvPolicy{TempRoot: root, PrivateHome: true})
 	script, _ := filepath.Abs("testdata/home.sh")
-	out, err := e.Capture(context.Background(), []string{script, "helper", "0"}, t.TempDir(), nil, nil)
+	out, err := e.Capture(context.Background(), script, []string{"helper", "0"}, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestKubeconfigNeedsPrivateHome(t *testing.T) {
 		if _, err := e.Start(kubeRequest(t, "0", kube)); !errors.Is(err, ErrNoPrivateHome) {
 			t.Errorf("%+v: Start = %v, want ErrNoPrivateHome", p, err)
 		}
-		if _, err := e.Capture(t.Context(), []string{"true"}, t.TempDir(), nil, kube); !errors.Is(err, ErrNoPrivateHome) {
+		if _, err := e.Capture(t.Context(), "true", nil, t.TempDir(), nil, kube); !errors.Is(err, ErrNoPrivateHome) {
 			t.Errorf("%+v: Capture = %v, want ErrNoPrivateHome", p, err)
 		}
 	}
@@ -147,7 +147,7 @@ func TestKubeconfigNeedsPrivateHome(t *testing.T) {
 func TestCaptureKubeconfig(t *testing.T) {
 	e := New(Limits{}, EnvPolicy{TempRoot: t.TempDir(), PrivateHome: true})
 	script, _ := filepath.Abs("testdata/kube.sh")
-	out, err := e.Capture(t.Context(), []string{script, "0"}, t.TempDir(), nil,
+	out, err := e.Capture(t.Context(), script, []string{"0"}, t.TempDir(), nil,
 		&Kube{Config: []byte("helper-config"), Env: map[string]string{"RUNWARDEN_KUBE_CONTEXT": "acceptance"}})
 	if err != nil {
 		t.Fatal(err)

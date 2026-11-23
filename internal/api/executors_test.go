@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/catalinmuraru/runwarden/internal/activity"
+	"github.com/catalinmuraru/runwarden/internal/config"
 	"github.com/catalinmuraru/runwarden/internal/executor"
 	"github.com/catalinmuraru/runwarden/internal/remote"
 	"github.com/catalinmuraru/runwarden/internal/secrets"
@@ -33,9 +35,12 @@ func connectExecutor(t *testing.T, e *testEnv) *remote.Agent {
 			t.Fatal(err)
 		}
 	}
+	cat := e.srv.catalog.Load()
 	a := &remote.Agent{
 		URL: e.ts.URL, Token: executorToken, Environment: "production", Pod: "production-0", Version: "test",
 		Exec:      executor.New(executor.Limits{}, executor.EnvPolicy{TempRoot: t.TempDir(), PrivateHome: true, Prefix: "EXECUTOR_ENV_"}),
+		Catalog:   func() *config.Catalog { return cat }, // its own copy of the server's configs
+		BaseDir:   e.srv.opts.BaseDir,
 		Capacity:  10,
 		Secrets:   secrets.Store{Dir: sec},
 		UploadDir: t.TempDir(),
@@ -148,5 +153,27 @@ func TestExecutorEnvironment(t *testing.T) {
 	}
 	if strings.Join(page.Available["production"], ",") != "DB_PASSWORD" || len(page.Scripts[0].Missing["production"]) != 0 {
 		t.Errorf("production secrets = %v, missing %v", page.Available["production"], page.Scripts[0].Missing)
+	}
+
+	// The executor keeps its configs while the server's change: runs and helpers are refused
+	// until the executors roll.
+	cat := *alice.srv.catalog.Load()
+	cat.Scripts = slices.Clone(cat.Scripts)
+	for i, sc := range cat.Scripts {
+		if sc.Name == "Echo" {
+			changed := *sc
+			changed.WorkingDirectory = t.TempDir()
+			cat.Scripts[i] = &changed
+		}
+	}
+	alice.srv.SetCatalog(&cat)
+	const drift = "runner config of Echo differs between server and executor; roll the executors"
+	code, body = alice.do(http.MethodPost, "/api/scripts/Echo/runs", map[string]any{"values": map[string]any{"Name": "abc", "Env": "prod"}})
+	if code != http.StatusConflict || !strings.Contains(string(body), drift) {
+		t.Errorf("start with drifted config = %d %s", code, body)
+	}
+	code, body = alice.do(http.MethodGet, "/api/scripts/Echo/parameters/Target/values?Env=prod", nil)
+	if code == http.StatusOK || !strings.Contains(string(body), "could not load values") {
+		t.Errorf("helper with drifted config = %d %s", code, body)
 	}
 }

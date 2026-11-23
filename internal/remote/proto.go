@@ -3,6 +3,11 @@
 // its environment's token, then takes runs and dropdown helper calls over that connection.
 // Output, exit status and helper output come back on the same connection. The server never
 // dials an executor, and secret values never leave the executor.
+//
+// An executor runs only what its own runner configs describe: the server names a script (or
+// a helper of one of its parameters) and sends the values derived from parameters; program,
+// fixed arguments, working directory, secrets and kubeconfig come from the executor's config.
+// Both sides send the hash of the script's config, so a drift between them is refused.
 package remote
 
 import (
@@ -25,7 +30,7 @@ const Path = "/api/executors/connect"
 const EnvironmentHeader = "X-Runwarden-Environment"
 
 // Protocol is the version of the message set below. Server and executor must agree.
-const Protocol = 1
+const Protocol = 2
 
 // Message types. "→ executor" messages are sent by the server, "→ server" by the executor.
 const (
@@ -75,13 +80,14 @@ type Hello struct {
 	Cluster   *kube.Status   `json:"cluster,omitempty"` // its environment's kubeconfig, if any
 }
 
-// Start asks the executor to run Job. The executor adds its environment's secrets and
-// kubeconfig itself; Files are the run's uploaded files, which it writes to its own disk and
-// whose server paths it replaces in the job.
+// Start asks the executor to run the script Job.Script with ParamArgs. The executor takes the
+// program, fixed arguments, directory, secrets and kubeconfig from its own config of that
+// script; Files are the run's uploaded files, which it writes to its own disk and whose server
+// paths it replaces in the parameter values.
 type Start struct {
 	Job        executor.Job `json:"job"`
-	Secrets    []string     `json:"secrets,omitempty"` // names the script declares
-	Kubernetes bool         `json:"kubernetes,omitempty"`
+	ParamArgs  []string     `json:"param_args,omitempty"` // arguments built from the parameter values
+	ConfigHash string       `json:"config_hash"`          // config.Script.Hash on the server
 	Files      []File       `json:"files,omitempty"`
 }
 
@@ -104,12 +110,15 @@ type Exit struct {
 	Truncated bool            `json:"truncated,omitempty"`
 }
 
-// Capture asks the executor to run a dropdown helper and return its output.
+// Capture asks the executor to run a helper of a parameter (Kind: config.HelperValues or
+// config.HelperDefault) and return its output. The executor expands the helper command of its
+// own config with Values, the validated values of the parameters it references.
 type Capture struct {
-	Command    []string `json:"command"`
-	Dir        string   `json:"dir"`
-	Secrets    []string `json:"secrets,omitempty"`
-	Kubernetes bool     `json:"kubernetes,omitempty"`
+	Script     string            `json:"script"`
+	Param      string            `json:"param"`
+	Kind       string            `json:"kind"`
+	Values     map[string]string `json:"values,omitempty"`
+	ConfigHash string            `json:"config_hash"`
 }
 
 // HashToken returns the hex SHA-256 of an executor token, as the server is configured with.

@@ -121,7 +121,7 @@ func (e *Executor) Start(req Request) (*Run, error) {
 
 // StartJob launches a prepared run, like Start.
 func (e *Executor) StartJob(job Job) (*Run, error) {
-	if len(job.Command) == 0 {
+	if job.Program == "" {
 		return nil, errors.New("executor: no command to run")
 	}
 	if job.ID == "" {
@@ -238,7 +238,7 @@ func (e *Executor) start(job Job, onEnd func()) (*Run, error) {
 		logger().Warn("env variable refused for parameter", "script", job.Script, "variable", name)
 	}
 
-	name, args, env := e.wrap(job.Command[0], slices.Clone(job.Command[1:]), env,
+	name, args, env := e.wrap(job.Program, slices.Clone(job.Args), env,
 		[]string{ws.shared, job.Uploads}, []string{tmpDir, ws.own})
 	// No context: a canceled context would kill only the main process, while runs end through
 	// Stop/Kill/timeout, which signal the whole process group.
